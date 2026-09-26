@@ -1,0 +1,34 @@
+name: Zigbee Monitor
+version: "1.0.0"
+slug: zigbee_monitor
+description: Watches your Zigbee2MQTT devices and alerts you when one goes offline or disappears (requires Zigbee2MQTT)
+url: https://github.com/rbellizzi71/ha-zigbee-monitor
+image: ghcr.io/rbellizzi71/{arch}-addon-zigbee_monitor
+init: false
+arch:
+  - amd64
+  - aarch64
+hassio_api: true
+homeassistant_api: true
+services:
+  - mqtt:want
+ingress: true
+panel_icon: mdi:zigbee
+panel_title: Zigbee Monitor
+options:
+  mqtt_tls: false
+  z2m_base_topic: zigbee2mqtt
+  language: auto
+  mqtt_discovery: true
+  notify_targets: []
+schema:
+  mqtt_host: str?
+  mqtt_port: port?
+  mqtt_user: str?
+  mqtt_password: password?
+  mqtt_tls: bool
+  z2m_base_topic: "match(^[^\\s+#/]+(/[^\\s+#/]+)*$)"
+  language: list(auto|es|en)
+  mqtt_discovery: bool
+  notify_targets:
+    - "match(^notify\\.[a-z0-9_]+$)"

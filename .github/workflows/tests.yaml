@@ -1,0 +1,38 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pyyaml
+      - name: Run tests
+        working-directory: tests
+        run: |
+          status=0
+          for test in test_*.py; do
+            echo "::group::$test"
+            timeout 180 python "$test" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Home Assistant add-on linter
+        uses: frenck/action-addon-linter@v2
+        with:
+          path: "./zigbee_monitor"

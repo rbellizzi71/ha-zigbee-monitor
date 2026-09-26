@@ -1,0 +1,28 @@
+configuration:
+  mqtt_host:
+    name: MQTT server
+    description: Leave empty to use Home Assistant's broker (Mosquitto add-on) automatically. Fill in only for an external broker.
+  mqtt_port:
+    name: MQTT port
+    description: External broker port (usually 1883).
+  mqtt_user:
+    name: MQTT user
+    description: User for the external broker.
+  mqtt_password:
+    name: MQTT password
+    description: Password of that user.
+  mqtt_tls:
+    name: Use TLS
+    description: Encrypts the connection to the external broker.
+  z2m_base_topic:
+    name: Zigbee2MQTT base topic
+    description: Change it only if you changed base_topic in Zigbee2MQTT.
+  language:
+    name: Language
+    description: Language of messages and panel (auto = Home Assistant's).
+  mqtt_discovery:
+    name: MQTT discovery
+    description: Creates and keeps the entities in Home Assistant; turning it off removes them.
+  notify_targets:
+    name: Notifications
+    description: notify.* targets that receive the alerts.
