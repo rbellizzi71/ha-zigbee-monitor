@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+- Fixed: stopping watching an offline device could, rarely, send a false "Recovered" notification.
+
 ## 1.0.1
 
 - Configuration options translated for Spanish (Latin America). Home Assistant does not fall back

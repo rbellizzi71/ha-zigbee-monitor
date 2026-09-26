@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 DATA = Path(os.environ.get('ZM_DATA', '/data'))
 OPTIONS = DATA / 'options.json'
 DEVICES = DATA / 'devices.json'
@@ -1240,10 +1240,19 @@ def discovery_messages(enabled, slug=None):
 # ---------- Web panel (Ingress) ----------
 
 class PanelState:
+    """Shared between the web panel (HTTP threads) and the main loop.
+
+    A watch-list change is saved in the DeviceStore and queued for the main loop in one step
+    under change_lock, and the main loop applies the queue and takes its status report under
+    the same lock. Otherwise a report taken between both steps would already miss a removed
+    offline device while the tracker still expects it, and announce a false recovery.
+    """
+
     def __init__(self):
         self.lock = threading.Lock()
         self.payload = None
         self.changes = queue.Queue()  # watch-list changes, applied to tracker/journal by the main loop
+        self.change_lock = threading.Lock()
 
     def set(self, payload):
         with self.lock:
@@ -1252,6 +1261,29 @@ class PanelState:
     def get(self):
         with self.lock:
             return self.payload
+
+    def change_watch_list(self, store, add, remove, actual):
+        """From the panel: save the change and queue it for the main loop, as one step."""
+        with self.change_lock:
+            added, removed = store.update(add, remove, actual)
+            if added or removed:
+                self.changes.put((added, removed))
+            return added, removed
+
+    def sync(self, monitor, tracker):
+        """From the main loop: apply queued changes and take the status report, as one step.
+        Returns (report, whether anything changed)."""
+        changed = False
+        with self.change_lock:
+            while not self.changes.empty():
+                added, removed = self.changes.get()
+                for key, items in (('watch_now', added), ('watch_stopped', removed)):
+                    if items:
+                        LOG.info(t(key, names=names(items)))
+                        journal_write(SYSTEM, t(key, names=names(items)))
+                tracker.watch_list_changed(removed)
+                changed = True
+            return monitor.report(), changed
 
 
 def render_page():
@@ -1336,9 +1368,7 @@ def make_handler(journal, panel, monitor=None):
                 if add and actual is None:
                     self.send_error(409)  # Zigbee2MQTT has no valid data: nothing can be added
                     return
-                added, removed = monitor.store.update(add, remove, actual or {})
-                if added or removed:
-                    panel.changes.put((added, removed))
+                added, removed = panel.change_watch_list(monitor.store, add, remove, actual or {})
                 self._send(200, json.dumps({'added': added, 'removed': removed}, ensure_ascii=False),
                            'application/json; charset=utf-8')
             else:
@@ -1478,16 +1508,10 @@ def main():
                     tracker.mqtt_down()
                 connected = False
                 continue
-            while not panel.changes.empty():
-                added, removed = panel.changes.get()
-                for key, items in (('watch_now', added), ('watch_stopped', removed)):
-                    if items:
-                        LOG.info(t(key, names=names(items)))
-                        journal_write(SYSTEM, t(key, names=names(items)))
-                tracker.watch_list_changed(removed)
-                dirty = True
+            report, changed = panel.sync(monitor, tracker)
+            dirty = dirty or changed
             now = time.monotonic()
-            tracker.observe(monitor.report(), monitor.bridge, now)
+            tracker.observe(report, monitor.bridge, now)
             tracker.tick(now)
             if JOURNAL.version != journal_version:
                 dirty = True
