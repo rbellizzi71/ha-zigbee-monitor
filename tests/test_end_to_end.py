@@ -56,7 +56,7 @@ def check(name, cond, detail=''):
     global fails
     print(('OK   ' if cond else 'FAIL ') + name + ('' if cond else '  -> %s' % detail))
     fails += not cond
-check('arranque sin vigilados', body[0] == ['SYSTEM', 'Monitor iniciado (v1.0.0): 0 dispositivos vigilados, 1 destino de notificación · MQTT: manual (broker) · Z2M: zigbee2mqtt'], body[0])
+check('arranque sin vigilados', body[0] == ['SYSTEM', 'Monitor iniciado (v%s): 0 dispositivos vigilados, 1 destino de notificación · MQTT: manual (broker) · Z2M: zigbee2mqtt' % m.VERSION], body[0])
 check('estado NO_DATA sin dispositivos', ['NO_DATA', 'Ningún dispositivo seleccionado para vigilar'] in body, body)
 check('panel mostró 3 sin vigilar antes de elegir', len(seen['before']['unwatched']) == 3 and seen['before']['watched'] == [], seen.get('before'))
 check('vigilar todos → línea de sistema', ['SYSTEM', 'Ahora se vigila: luz_a, puerta_c, sensor_b'] in body, body)

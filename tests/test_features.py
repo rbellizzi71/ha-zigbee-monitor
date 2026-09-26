@@ -167,7 +167,7 @@ m.main()
 lines = [l.split(' | ', 2)[1:] for l in m.EVENTS.read_text().splitlines()]
 for l in lines:
     print('   ', l)
-check('arranque: MQTT automático y tema base', lines[0] == ['SYSTEM', 'Monitor iniciado (v1.0.0): 2 dispositivos vigilados, 1 destino de notificación · MQTT: automático · Z2M: casa/z2m'], lines[0])
+check('arranque: MQTT automático y tema base', lines[0] == ['SYSTEM', 'Monitor iniciado (v%s): 2 dispositivos vigilados, 1 destino de notificación · MQTT: automático · Z2M: casa/z2m' % m.VERSION], lines[0])
 check('conectó al broker de HA con sus credenciales', fake.CONNECTS[0] == ('core-mosquitto', 1883, 'addons'), fake.CONNECTS)
 check('suscrito solo al tema base', 'services/mqtt' in SUP)
 body = [x[1] for x in lines]

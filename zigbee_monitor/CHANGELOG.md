@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- Configuration options translated for Spanish (Latin America). Home Assistant does not fall back
+  from `es-419` to `es`, so those users saw the options in English.
+
 ## 1.0.0
 
 First public release.
