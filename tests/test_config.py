@@ -7,7 +7,7 @@ ADDON = ROOT / 'zigbee_monitor'
 fails = 0
 def check(name, cond, detail=''):
     global fails
-    print(('OK   ' if cond else 'FAIL ') + name + ('' if cond else '  -> %s' % detail))
+    print(('OK   ' if cond else 'FAIL ') + name + ('' if cond else '  -> %s' % (detail,)))
     fails += not cond
 config = yaml.safe_load((ADDON / 'config.yaml').read_text())
 code = (ADDON / 'monitor.py').read_text()

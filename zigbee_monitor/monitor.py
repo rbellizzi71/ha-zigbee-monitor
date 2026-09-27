@@ -1,5 +1,6 @@
 """Zigbee Monitor. Supervisor owns options; this process never writes options.json."""
 import collections
+import base64
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -9,20 +10,40 @@ import os
 from pathlib import Path
 import queue
 import re
+import secrets
 import signal
+import socket
+import struct
 import ssl
 import threading
 import time
 import urllib.error
 import urllib.request
 
-VERSION = '1.0.2'
+VERSION = '1.2.0'
 DATA = Path(os.environ.get('ZM_DATA', '/data'))
 OPTIONS = DATA / 'options.json'
 DEVICES = DATA / 'devices.json'
 EVENTS = DATA / 'eventos.log'
 ALERTS = DATA / 'notificados.json'
 ALERT_DELAY = int(os.environ.get('ZM_ALERT_DELAY', '120'))  # Z2M offline / MQTT lost must last this long
+# Device notifications are grouped: each change restarts the wait; the net result is sent after
+# NOTIFY_GROUP seconds without changes.
+NOTIFY_GROUP = float(os.environ.get('ZM_NOTIFY_GROUP', '20'))
+# General failure: this many devices lost within GENERAL_WINDOW seconds, or in the same group
+# (each within NOTIFY_GROUP seconds of the previous one), is announced at once, without names.
+GENERAL_FAILURE = 5
+GENERAL_WINDOW = 60
+# After a general failure, reconnections are gathered until the network is quiet this long.
+RECOVERY_SETTLE = float(os.environ.get('ZM_RECOVERY_SETTLE', '120'))
+RECOVERY_SETTLE_MAX = 600
+# Actionable notifications (Home Assistant Companion app): buttons in the general-failure message.
+ACTION_PREFIX = 'ZIGBEE_MONITOR_'
+ACTION_TTL = 3600          # seconds a button stays valid
+PANEL_RESTART = 'PANEL_RESTART'  # the restart button of the web panel
+WAIT_REMINDER = float(os.environ.get('ZM_WAIT_REMINDER', '600'))
+HOME_URI = '/lovelace'  # where the "Open Home Assistant" button goes
+NOTIFY_TAG = 'zigbee_monitor_network'
 NOTIFY_TITLE = 'Zigbee Monitor'
 NEW_DEVICE_HOURS = 24      # the panel marks unwatched devices first seen this recently as NEW
 EVENTS_MAX_BYTES = 1_000_000
@@ -44,6 +65,7 @@ JOURNAL = None  # Journal instance, created in main()
 # Event types stored in eventos.log (stable codes; the panel shows translated labels).
 OK, PROBLEM, NO_DATA = 'OK', 'PROBLEM', 'NO_DATA'
 Z2M, MQTT, NOTIFY, SYSTEM = 'Z2M', 'MQTT', 'NOTIFY', 'SYSTEM'
+RECOVERED = 'RECOVERED'  # history lines that only report recoveries
 BASE_TOPIC_RE = re.compile(r'[^\s+#/]+(/[^\s+#/]+)*')
 
 
@@ -522,6 +544,22 @@ MESSAGES = {
         'label_missing': 'Desaparecidos',
         'label_unknown': 'Sin datos',
         'new_offline': 'Nuevo offline',
+        'general_failure': 'Falla general: {n} dispositivos dejaron de responder en poco tiempo. Posible problema del coordinador, de un router u otra causa',
+        'stable_all': 'Red estable: todo en línea',
+        'stable_recovered_one': 'Red estable: se recuperó {n} dispositivo',
+        'stable_recovered_other': 'Red estable: se recuperaron {n} dispositivos',
+        'still_offline_one': 'Sigue offline: {names}',
+        'still_offline_other': 'Siguen offline: {names}',
+        'still_down_one': 'Sigue sin responder {n} dispositivo',
+        'still_down_other': 'Siguen sin responder {n} dispositivos',
+        'panel_restart': 'Reinicio de Zigbee2MQTT pedido desde el panel',
+        'button_restart': 'Reiniciar Zigbee2MQTT',
+        'button_wait': 'Esperar 10 min',
+        'button_panel': 'Abrir Home Assistant',
+        'restart_requested': 'Reiniciando Zigbee2MQTT. Te aviso cuando la red se estabilice',
+        'action_restart': 'Reinicio de Zigbee2MQTT pedido desde la notificación',
+        'action_wait': 'Espera de {m} min pedida desde la notificación',
+        'action_expired': 'Botón de una notificación vencida: ignorado',
         'recovered': 'Recuperado',
         'new_missing': 'Desaparecido',
         'reappeared': 'Reapareció',
@@ -550,6 +588,7 @@ MESSAGES = {
         'log_alerts_save_failed': 'No se pudo guardar el estado de notificaciones',
         'log_notify_failed': 'No se pudo enviar la notificación a: {targets}',
         'log_panel_failed': 'No se pudo iniciar el panel web en el puerto {port}; el monitoreo continúa',
+        'log_buttons_retry': 'Sin conexión con Home Assistant para los botones de las notificaciones ({error}); reintento en 30 s',
         'log_fatal': 'Monitor detenido ({error}). Revisar configuración y estado de inicialización; no se importará por error.',
         # MQTT discovery entity names
         'entity_state': 'Estado',
@@ -591,6 +630,22 @@ MESSAGES = {
         'label_missing': 'Missing',
         'label_unknown': 'No data',
         'new_offline': 'New offline',
+        'general_failure': 'General failure: {n} devices stopped responding within a short time. Possible problem with the coordinator, a router or something else',
+        'stable_all': 'Network stable: everything online',
+        'stable_recovered_one': 'Network stable: {n} device recovered',
+        'stable_recovered_other': 'Network stable: {n} devices recovered',
+        'still_offline_one': 'Still offline: {names}',
+        'still_offline_other': 'Still offline: {names}',
+        'still_down_one': '{n} device still not responding',
+        'still_down_other': '{n} devices still not responding',
+        'panel_restart': 'Zigbee2MQTT restart requested from the panel',
+        'button_restart': 'Restart Zigbee2MQTT',
+        'button_wait': 'Wait 10 min',
+        'button_panel': 'Open Home Assistant',
+        'restart_requested': 'Restarting Zigbee2MQTT. You will be told when the network settles',
+        'action_restart': 'Zigbee2MQTT restart requested from the notification',
+        'action_wait': 'Wait of {m} min requested from the notification',
+        'action_expired': 'Button of an expired notification: ignored',
         'recovered': 'Recovered',
         'new_missing': 'Missing',
         'reappeared': 'Reappeared',
@@ -618,6 +673,7 @@ MESSAGES = {
         'log_alerts_save_failed': 'Could not save the notification state',
         'log_notify_failed': 'Could not send the notification to: {targets}',
         'log_panel_failed': 'Could not start the web panel on port {port}; monitoring continues',
+        'log_buttons_retry': 'No connection to Home Assistant for notification buttons ({error}); retrying in 30 s',
         'log_fatal': 'Monitor stopped ({error}). Check the configuration and initialization state; nothing will be imported by mistake.',
         'entity_state': 'State',
         'entity_problem': 'Problem',
@@ -644,6 +700,10 @@ PANEL_TEXTS = {
         'setup_banner': 'Todavía no vigilas ningún dispositivo. Elige cuáles vigilar para que el monitor pueda avisarte.',
         'choose_devices': 'Elegir dispositivos', 'watch_all_n': 'Vigilar todos ({n})',
         'reason_no_devices': 'Motivo: ningún dispositivo seleccionado',
+        'general_banner': 'Falla general en curso: varios dispositivos dejaron de responder. Si no se recuperan, reinicia Zigbee2MQTT.',
+        'restart_z2m': 'Reiniciar Zigbee2MQTT',
+        'confirm_restart': '¿Reiniciar Zigbee2MQTT ahora? Puede tardar unos minutos en reconectar todos los dispositivos.',
+        'restart_failed': 'No se pudo pedir el reinicio: {error}',
         'availability_banner': 'La disponibilidad (availability) está desactivada en Zigbee2MQTT, por eso no se puede saber si un dispositivo está offline. Actívala en Zigbee2MQTT → Configuración → Disponibilidad.',
         'dev_search': 'Buscar por nombre o IEEE',
         'dev_summary': '{watched} vigilados · {unwatched} sin vigilar · Zigbee2MQTT: {z2m}',
@@ -659,7 +719,7 @@ PANEL_TEXTS = {
         'new_since': 'NUEVO · {when}', 'since': 'desde {when}',
         'update_failed': 'No se pudo actualizar la lista: {error}',
         'states': {'OK': 'OK', 'PROBLEM': 'PROBLEMA', 'NO_DATA': 'SIN DATOS'},
-        'types': {'OK': 'OK', 'PROBLEM': 'PROBLEMA', 'NO_DATA': 'SIN DATOS', 'Z2M': 'Z2M', 'MQTT': 'MQTT',
+        'types': {'OK': 'OK', 'RECOVERED': 'RECUPERADO', 'PROBLEM': 'PROBLEMA', 'NO_DATA': 'SIN DATOS', 'Z2M': 'Z2M', 'MQTT': 'MQTT',
                   'NOTIFY': 'NOTIF', 'SYSTEM': 'SISTEMA'},
     },
     'en': {
@@ -679,6 +739,10 @@ PANEL_TEXTS = {
         'setup_banner': 'You are not watching any device yet. Choose which ones to watch so the monitor can alert you.',
         'choose_devices': 'Choose devices', 'watch_all_n': 'Watch all ({n})',
         'reason_no_devices': 'Reason: no device selected',
+        'general_banner': 'General failure in progress: several devices stopped responding. If they do not recover, restart Zigbee2MQTT.',
+        'restart_z2m': 'Restart Zigbee2MQTT',
+        'confirm_restart': 'Restart Zigbee2MQTT now? It may take a few minutes to reconnect every device.',
+        'restart_failed': 'Could not request the restart: {error}',
         'availability_banner': 'Availability is disabled in Zigbee2MQTT, so the monitor cannot tell whether a device is offline. Enable it in Zigbee2MQTT → Settings → Availability.',
         'dev_search': 'Search by name or IEEE',
         'dev_summary': '{watched} watched · {unwatched} not watched · Zigbee2MQTT: {z2m}',
@@ -694,7 +758,7 @@ PANEL_TEXTS = {
         'new_since': 'NEW · {when}', 'since': 'since {when}',
         'update_failed': 'Could not update the list: {error}',
         'states': {'OK': 'OK', 'PROBLEM': 'PROBLEM', 'NO_DATA': 'NO DATA'},
-        'types': {'OK': 'OK', 'PROBLEM': 'PROBLEM', 'NO_DATA': 'NO DATA', 'Z2M': 'Z2M', 'MQTT': 'MQTT',
+        'types': {'OK': 'OK', 'RECOVERED': 'RECOVERED', 'PROBLEM': 'PROBLEM', 'NO_DATA': 'NO DATA', 'Z2M': 'Z2M', 'MQTT': 'MQTT',
                   'NOTIFY': 'NOTIFY', 'SYSTEM': 'SYSTEM'},
     },
 }
@@ -886,6 +950,7 @@ class EventTracker:
         self.bridge = None        # last known Zigbee2MQTT bridge state
         self.settle_until = None
         self.settle_is_z2m = False
+        self.settle_down = {}     # during a Zigbee2MQTT settle: name -> 'recovered'/'reappeared' label, still down
         self.logged = None        # last payload written to the history
         self.logged_signature = None
         self.force_full = False
@@ -921,21 +986,47 @@ class EventTracker:
             elif bridge == 'online' and self.bridge == 'offline':
                 self.write(Z2M, t('z2m_back', s=self.settle_z2m))
                 self._settle(now, self.settle_z2m, z2m=True)
+                old = self.logged if self.logged and self.logged.get('data_valid') else {}
+                self.settle_down = {name: removed for key, _, _, removed in CATEGORIES[:2]
+                                    for name in old.get(key) or []}
             self.bridge = bridge
         if not ready or self.mqtt != 'up' or bridge != 'online':
             return
         if self.settle_until is not None:
             if now < self.settle_until:
+                if self.settle_is_z2m:
+                    self._log_reconnections(payload)
                 return
             z2m = self.settle_is_z2m
             self.settle_until, self.settle_is_z2m = None, False
+            self.settle_down = {}
             if z2m:
                 self.write(Z2M, t('z2m_settled'))
                 self._check_availability(payload.get('z2m_availability'))
-                self._log(payload, full=True)
+                self._log(payload, now, full=True)
                 return
         self._check_availability(payload.get('z2m_availability'))
-        self._log(payload)
+        self._log(payload, now)
+
+    def _log_reconnections(self, payload):
+        """During a Zigbee2MQTT settle, write each device that was down before and is online again,
+        at the moment it comes back. Devices without data yet are not online: nothing is written."""
+        if not payload.get('data_valid') or not self.settle_down:
+            return
+        not_online = set()
+        for key, _, _, _ in CATEGORIES:
+            not_online.update(payload.get(key) or [])
+        back = sorted(name for name in self.settle_down if name not in not_online)
+        if not back:
+            return
+        parts = []
+        for label in ('recovered', 'reappeared'):
+            group = [name for name in back if self.settle_down[name] == label]
+            if group:
+                parts.append('%s: %s' % (t(label), names(group)))
+        for name in back:
+            del self.settle_down[name]
+        self.write(RECOVERED, ' · '.join(parts))
 
     def _check_availability(self, value):
         """One line (and one notice) when Zigbee2MQTT availability turns out disabled, one when enabled again."""
@@ -950,36 +1041,47 @@ class EventTracker:
         self.availability = value
         self.alerts.availability(value is False)
 
-    def _log(self, payload, full=False):
+    def _log(self, payload, now, full=False):
         current = signature(payload)
         if not full and current == self.logged_signature:
             return
         full, self.force_full = full or self.force_full, False
         old = self.logged
+        kind = state_type(payload)
         if full or old is None or not old.get('data_valid') or not payload.get('data_valid'):
             text = describe(payload)
         else:
             changes = delta(old, payload)
+            if kind != OK and changes and not any(
+                    set(payload.get(key) or []) - set(old.get(key) or []) for key, _, _, _ in CATEGORIES):
+                kind = RECOVERED  # nothing was lost: only recoveries
+
             if payload['state'] == OK:
                 changes.append(t('all_online'))
             else:
                 changes.append(t('total', offline=len(payload['offline_names']),
                                  missing=len(payload['missing_names'])))
             text = ' · '.join(changes)
-        self.write(state_type(payload), text)
+        self.write(kind, text)
         self.logged, self.logged_signature = payload, current
         no_devices = payload.get('reason') == 'no_devices'
         self.alerts.setup(no_devices)
         if not no_devices:
-            self.alerts.devices(payload)
+            self.alerts.devices(payload, now)
 
     def tick(self, now):
-        """Timers that must run even while disconnected (delayed system notifications)."""
+        """Timers that must run even while disconnected (delayed and grouped notifications)."""
         self.alerts.system(self.mqtt, self.bridge, now)
+        # Grouped device notifications wait while the data cannot be trusted: MQTT down,
+        # Zigbee2MQTT offline or a settle window. They resolve against the settled state.
+        hold = self.mqtt != 'up' or self.bridge != 'online' or self.settle_until is not None
+        self.alerts.flush(now, hold)
 
 
-def send_notification(target, message):
-    """target is notify.<name>: a notify entity (notify.send_message) or a legacy notify service."""
+def send_notification(target, message, extra=None):
+    """target is notify.<name>: a notify entity (notify.send_message) or a legacy notify service.
+    extra: Companion-app data (tag, buttons); only sent to mobile_app services, the only ones
+    that understand it. Other targets get the plain message."""
     try:
         core_api('GET', 'states/' + target)
         is_entity = True
@@ -991,8 +1093,11 @@ def send_notification(target, message):
         core_api('POST', 'services/notify/send_message',
                  {'entity_id': target, 'title': NOTIFY_TITLE, 'message': message})
     else:
-        core_api('POST', 'services/notify/' + target.split('.', 1)[1],
-                 {'title': NOTIFY_TITLE, 'message': message})
+        service = target.split('.', 1)[1]
+        body = {'title': NOTIFY_TITLE, 'message': message}
+        if extra and service.startswith('mobile_app_'):
+            body['data'] = extra
+        core_api('POST', 'services/notify/' + service, body)
 
 
 def failure_reason(exc):
@@ -1012,9 +1117,9 @@ class Notifier:
         if self.targets:
             threading.Thread(target=self._worker, name='notifications', daemon=True).start()
 
-    def send(self, message):
+    def send(self, message, extra=None):
         if self.targets:
-            self.queue.put(message)
+            self.queue.put((message, extra))
 
     def flush(self, timeout):
         deadline = time.monotonic() + timeout
@@ -1023,11 +1128,11 @@ class Notifier:
 
     def _worker(self):
         while True:
-            message = self.queue.get()
+            message, extra = self.queue.get()
             failed = []
             for target in self.targets:
                 try:
-                    self.deliver(target, message)
+                    self.deliver(target, message, extra) if extra else self.deliver(target, message)
                 except Exception as exc:  # one attempt per message: no retry loops
                     failed.append('%s (%s)' % (target, failure_reason(exc)))
             sent = len(self.targets) - len(failed)
@@ -1046,12 +1151,29 @@ class Alerts:
     repeat known problems, but still reports what recovered or failed meanwhile.
     Zigbee2MQTT offline and a lost MQTT connection are only notified if they last
     ALERT_DELAY seconds (a planned restart takes less).
+
+    Device changes are grouped: each change restarts a wait of `group` seconds and, once the
+    devices stop changing, one message tells the net result. Five or more devices lost within a
+    minute (or in one group) are a general failure: one message at once, without names, with
+    buttons; then silence until the network is stable again, told in one final message.
     """
 
-    def __init__(self, notifier, expected_names, path=ALERTS, delay=None):
+    def __init__(self, notifier, expected_names, path=ALERTS, delay=None, group=None):
         self.notifier = notifier
         self.path = Path(path)
         self.delay = ALERT_DELAY if delay is None else delay
+        self.group = NOTIFY_GROUP if group is None else group
+        self.current = None       # latest device state {name: 'offline'|'missing'} waiting to be notified
+        self.first_change = None  # when the pending group started
+        self.last_change = None   # when the pending state last changed
+        self.losses = collections.deque()  # when devices were lost, for the GENERAL_WINDOW rule
+        # Open general failure: {'nonce', 'sent', 'remind_at', 'restarted', 'baseline', 'lost',
+        # 'recovering'}. While open, devices are not notified one by one.
+        self.general = None
+        # "Open Home Assistant" button. The Companion app opens add-on panels in the browser (without
+        # the session), so the button opens the app's default dashboard; the panel is in the sidebar.
+        self.home_uri = HOME_URI
+        self.write = journal_write
         self.enabled = bool(notifier is not None and notifier.targets)
         saved = self._load() if self.enabled else {}
         problems = saved.get('problems')
@@ -1076,6 +1198,8 @@ class Alerts:
             return {}
 
     def _save(self):
+        if not self.enabled:
+            return
         data = {'problems': self.problems, 'z2m': self.z2m_alerted, 'mqtt': self.mqtt_alerted,
                 'setup': self.setup_alerted, 'availability': self.availability_alerted}
         temporary = self.path.with_suffix('.tmp')
@@ -1087,7 +1211,14 @@ class Alerts:
 
     def forget(self, names):
         """Devices no longer watched: drop them silently from the memory."""
-        if self.enabled and any(name in self.problems for name in names):
+        if self.general:
+            for name in names:
+                self.general['baseline'].pop(name, None)
+                self.general['lost'].discard(name)
+        if self.current is not None:
+            for name in names:
+                self.current.pop(name, None)
+        if any(name in self.problems for name in names):
             for name in names:
                 self.problems.pop(name, None)
             self._save()
@@ -1110,8 +1241,10 @@ class Alerts:
         if disabled:
             self.notifier.send(t('alert_availability'))
 
-    def devices(self, payload):
-        if not self.enabled or not payload.get('data_valid'):
+    def devices(self, payload, now):
+        """A new device state (called when it changes). Notified later, grouped, by flush();
+        a general failure is announced right away."""
+        if not payload.get('data_valid'):
             return
         current = {name: 'offline' for name in payload['offline_names']}
         current.update({name: 'missing' for name in payload['missing_names']})
@@ -1119,11 +1252,77 @@ class Alerts:
         for name in payload.get('unknown_names') or []:
             if name in self.problems:
                 current.setdefault(name, self.problems[name])
+        previous = self.current if self.current is not None else self.problems
+        if current == previous:
+            return
+        for name in current:
+            if name not in previous:
+                self.losses.append((now, name))
+        while self.losses and now - self.losses[0][0] > GENERAL_WINDOW:
+            self.losses.popleft()
+        self.current = current
+        self.last_change = now
+        if self.first_change is None:
+            self.first_change = now
+        general = self.general
+        if general:
+            general['lost'].update(n for n in current if n not in general['baseline'])
+            if general['recovering'] is None and any(n not in current for n in general['lost']):
+                general['recovering'] = now
+            return
+        new_offline, new_missing, _ = self._changes(current)
+        if len(self.losses) >= GENERAL_FAILURE or len(new_offline) + len(new_missing) >= GENERAL_FAILURE:
+            self._start_general(current, now)
+
+    def _changes(self, current):
         new_offline = sorted(n for n, k in current.items() if k == 'offline' and self.problems.get(n) != 'offline')
         new_missing = sorted(n for n, k in current.items() if k == 'missing' and self.problems.get(n) != 'missing')
         recovered = sorted(n for n in self.problems if n not in current)
-        if not (new_offline or new_missing or recovered):
+        return new_offline, new_missing, recovered
+
+    def _buttons(self, nonce):
+        actions = [{'action': ACTION_PREFIX + 'RESTART_' + nonce, 'title': t('button_restart')},
+                   {'action': ACTION_PREFIX + 'WAIT_' + nonce, 'title': t('button_wait')}]
+        data = {'tag': NOTIFY_TAG, 'actions': actions}
+        actions.append({'action': 'URI', 'title': t('button_panel'), 'uri': self.home_uri})
+        return data
+
+    def _new_nonce(self, now):
+        self.general.update(nonce=secrets.token_hex(4), sent=now, restarted=False)
+        return self._buttons(self.general['nonce'])
+
+    def _start_general(self, current, now):
+        # Devices lost within the window belong to the failure even if already notified.
+        recent = {name for _, name in self.losses}
+        baseline = {n: k for n, k in self.problems.items() if n not in recent}
+        self.general = {'baseline': baseline, 'lost': {n for n in current if n not in baseline},
+                        'recovering': None, 'remind_at': None}
+        extra = self._new_nonce(now)
+        lost = len(self.general['lost'])
+        self.problems, self.current, self.first_change, self.last_change = current, None, None, None
+        self.losses.clear()
+        self._save()
+        self.notifier.send(t('general_failure', n=lost), extra)
+
+    def _down_since_failure(self, state):
+        return sorted(n for n in state if n not in self.general['baseline'])
+
+    def flush(self, now, hold=False):
+        """Send what is due. Normal changes: the net result once the devices stopped changing for
+        `group` seconds. During a general failure: nothing one by one; the "network stable" message
+        once the network is back as before (at once), or RECOVERY_SETTLE seconds after the last
+        reconnection (at most RECOVERY_SETTLE_MAX after the first one). While `hold`, keep waiting."""
+        if hold:
             return
+        if self.general:
+            self._flush_general(now)
+            return
+        if self.current is None or now - self.last_change < self.group:
+            return
+        current, self.current, self.first_change, self.last_change = self.current, None, None, None
+        new_offline, new_missing, recovered = self._changes(current)
+        if not (new_offline or new_missing or recovered):
+            return  # everything came back before the message was sent
         parts = []
         if new_offline:
             parts.append('%s: %s' % (t('new_offline'), names(new_offline)))
@@ -1137,6 +1336,62 @@ class Alerts:
         self.problems = current
         self._save()
         self.notifier.send(' · '.join(parts))
+
+    def _flush_general(self, now):
+        general = self.general
+        state = self.current if self.current is not None else self.problems
+        back_as_before = all(n in general['baseline'] for n in state)
+        settled = general['recovering'] is not None and (
+            now - (self.last_change or general['recovering']) >= RECOVERY_SETTLE
+            or now - general['recovering'] >= RECOVERY_SETTLE_MAX)
+        if back_as_before or settled:
+            recovered = sum(1 for n in general['lost'] if n not in state)
+            if state:
+                message = ' · '.join([tn('stable_recovered', recovered, n=recovered),
+                                      tn('still_offline', len(state), names=names(sorted(state)))])
+            else:
+                message = t('stable_all')
+            self.problems, self.current, self.first_change, self.last_change = state, None, None, None
+            self.general = None
+            self.losses.clear()
+            self._save()
+            self.notifier.send(message, {'tag': NOTIFY_TAG})  # replaces the failure notification
+            return
+        if general['remind_at'] is not None and now >= general['remind_at']:
+            general['remind_at'] = None
+            down = self._down_since_failure(state)
+            if down:
+                extra = self._new_nonce(now)
+                self.notifier.send(tn('still_down', len(down), n=len(down)), extra)
+
+    def action(self, name, now):
+        """A notification button was tapped. Returns 'restart' when Zigbee2MQTT must be restarted."""
+        if name == PANEL_RESTART:
+            if not self.general:
+                return None
+            self.general['remind_at'] = None
+            self.write(SYSTEM, t('panel_restart'))
+            self.notifier.send(t('restart_requested'), {'tag': NOTIFY_TAG})
+            return 'restart'
+        if not isinstance(name, str) or not name.startswith(ACTION_PREFIX):
+            return None
+        kind, _, nonce = name[len(ACTION_PREFIX):].partition('_')
+        general = self.general
+        if not general or nonce != general['nonce'] or now - general['sent'] > ACTION_TTL:
+            self.write(SYSTEM, t('action_expired'))
+            return None
+        if kind == 'RESTART':
+            if general['restarted']:
+                return None  # another phone was faster
+            general['restarted'] = True
+            general['remind_at'] = None
+            self.write(SYSTEM, t('action_restart'))
+            self.notifier.send(t('restart_requested'), {'tag': NOTIFY_TAG})
+            return 'restart'
+        if kind == 'WAIT':
+            general['remind_at'] = now + WAIT_REMINDER
+            self.write(SYSTEM, t('action_wait', m=int(WAIT_REMINDER // 60)))
+        return None
 
     def system(self, mqtt, bridge, now):
         """mqtt: 'up'/'down'/None; bridge: last known Zigbee2MQTT state."""
@@ -1173,8 +1428,14 @@ class Alerts:
 class NoAlerts:
     enabled = False
 
-    def devices(self, payload):
+    def devices(self, payload, now):
         pass
+
+    def flush(self, now, hold=False):
+        pass
+
+    def action(self, name, now):
+        return None
 
     def forget(self, names):
         pass
@@ -1187,6 +1448,145 @@ class NoAlerts:
 
     def system(self, mqtt, bridge, now):
         pass
+
+
+# ---------- Notification buttons ----------
+
+class WebSocket:
+    """Minimal WebSocket client (RFC 6455, text messages) for Home Assistant's API: no extra
+    dependency. Only what the button listener needs: send and receive JSON text."""
+
+    GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+
+    def __init__(self, host, port, path, timeout=30):
+        self.sock = socket.create_connection((host, port), timeout=timeout)
+        key = base64.b64encode(os.urandom(16)).decode()
+        self.sock.sendall(('GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                           'Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n' % (path, host, key)).encode())
+        head = b''
+        while b'\r\n\r\n' not in head:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise ConnectionError('closed during handshake')
+            head += chunk
+        head, self.buffer = head.split(b'\r\n\r\n', 1)
+        lines = head.decode('latin-1').split('\r\n')
+        if ' 101 ' not in lines[0] + ' ':
+            raise ConnectionError('handshake refused: ' + lines[0])
+        accept = base64.b64encode(hashlib.sha1((key + self.GUID).encode()).digest()).decode()
+        headers = {k.strip().lower(): v.strip() for k, _, v in (line.partition(':') for line in lines[1:])}
+        if headers.get('sec-websocket-accept') != accept:
+            raise ConnectionError('bad handshake')
+
+    def settimeout(self, timeout):
+        self.sock.settimeout(timeout)
+
+    def _read(self, n):
+        while len(self.buffer) < n:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise ConnectionError('connection closed')
+            self.buffer += chunk
+        data, self.buffer = self.buffer[:n], self.buffer[n:]
+        return data
+
+    def _frame(self, opcode, payload):
+        header = bytes([0x80 | opcode])
+        n = len(payload)
+        if n < 126:
+            header += bytes([0x80 | n])
+        elif n < 65536:
+            header += bytes([0x80 | 126]) + struct.pack('>H', n)
+        else:
+            header += bytes([0x80 | 127]) + struct.pack('>Q', n)
+        mask = os.urandom(4)
+        self.sock.sendall(header + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+    def send(self, text):
+        self._frame(0x1, text.encode('utf-8'))
+
+    def recv(self):
+        """Next complete text message (answers pings, raises on close)."""
+        message = b''
+        while True:
+            first, second = self._read(2)
+            opcode, n = first & 0x0F, second & 0x7F
+            if n == 126:
+                n = struct.unpack('>H', self._read(2))[0]
+            elif n == 127:
+                n = struct.unpack('>Q', self._read(8))[0]
+            mask = self._read(4) if second & 0x80 else None
+            payload = self._read(n)
+            if mask:
+                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+            if opcode == 0x8:
+                raise ConnectionError('closed by server')
+            if opcode == 0x9:
+                self._frame(0xA, payload)
+                continue
+            if opcode in (0x1, 0x2, 0x0):
+                message += payload
+                if first & 0x80:
+                    return message.decode('utf-8')
+
+    def close(self):
+        try:
+            self._frame(0x8, b'')
+        except OSError:
+            pass
+        self.sock.close()
+
+
+class ActionListener:
+    """Listens to Home Assistant for taps on notification buttons (event
+    mobile_app_notification_action) through the Supervisor's WebSocket proxy, and hands the
+    button names to the main loop. Reconnects on its own; without it, buttons just do nothing."""
+
+    URL = 'ws://supervisor/core/websocket'
+
+    def __init__(self, actions, connect=None, retry=30):
+        self.actions = actions            # queue.Queue read by the main loop
+        self.connect = connect or self._connect
+        self.retry = retry
+        self.stopped = threading.Event()
+
+    def start(self):
+        threading.Thread(target=self._run, name='notification-buttons', daemon=True).start()
+        return self
+
+    def _connect(self):
+        return WebSocket('supervisor', 80, '/core/websocket')
+
+    def _run(self):
+        while not self.stopped.is_set():
+            try:
+                self._session()
+            except Exception as exc:
+                LOG.warning(t('log_buttons_retry', error=type(exc).__name__))
+            self.stopped.wait(self.retry)
+
+    def _session(self):
+        token = os.environ.get('SUPERVISOR_TOKEN')
+        if not token:
+            raise RuntimeError('SUPERVISOR_TOKEN missing')
+        ws = self.connect()
+        try:
+            if json.loads(ws.recv()).get('type') != 'auth_required':
+                raise RuntimeError('unexpected handshake')
+            ws.send(json.dumps({'type': 'auth', 'access_token': token}))
+            if json.loads(ws.recv()).get('type') != 'auth_ok':
+                raise RuntimeError('authentication refused')
+            ws.send(json.dumps({'id': 1, 'type': 'subscribe_events', 'event_type': 'mobile_app_notification_action'}))
+            ws.settimeout(None)
+            while not self.stopped.is_set():
+                message = json.loads(ws.recv())
+                if message.get('type') != 'event':
+                    continue
+                action = (message.get('event') or {}).get('data', {}).get('action')
+                if isinstance(action, str) and action.startswith(ACTION_PREFIX):
+                    self.actions.put(action)
+        finally:
+            ws.close()
 
 
 # ---------- MQTT discovery ----------
@@ -1252,6 +1652,7 @@ class PanelState:
         self.lock = threading.Lock()
         self.payload = None
         self.changes = queue.Queue()  # watch-list changes, applied to tracker/journal by the main loop
+        self.actions = queue.Queue()  # restart requests (panel button, notification buttons)
         self.change_lock = threading.Lock()
 
     def set(self, payload):
@@ -1347,6 +1748,16 @@ def make_handler(journal, panel, monitor=None):
             raw = self.rfile.read(min(length, 65536)) if length else b''
             path = self.path.split('?', 1)[0]
             # A custom header cannot be sent cross-site without CORS: blocks CSRF.
+            if path == '/api/restart':
+                if self.headers.get('X-Zigbee-Monitor') != 'restart':
+                    self.send_error(403)
+                    return
+                if not (panel.get() or {}).get('general_failure'):
+                    self.send_error(409)  # only offered during a general failure
+                    return
+                panel.actions.put(PANEL_RESTART)
+                self._send(200, '{"ok": true}', 'application/json; charset=utf-8')
+                return
             if path == '/api/clear':
                 if self.headers.get('X-Zigbee-Monitor') != 'clear':
                     self.send_error(403)
@@ -1416,10 +1827,16 @@ def main():
                              t=len(targets), mqtt=mode, base=base))
     monitor = Monitor(store, base)
     notifier = Notifier(targets)
-    tracker = EventTracker(alerts=Alerts(notifier, set(monitor.expected.values())))
+    alerts = Alerts(notifier, set(monitor.expected.values()))
+    tracker = EventTracker(alerts=alerts)
+    slug = own_slug()
+    button_actions = queue.Queue()
+    if targets:
+        ActionListener(button_actions).start()
     panel = PanelState()
+    panel.actions = button_actions
     start_panel(JOURNAL, panel, monitor=monitor)
-    announcements = discovery_messages(discovery, own_slug() if discovery else None)
+    announcements = discovery_messages(discovery, slug if discovery else None)
     running = True
 
     def stop(*_):
@@ -1511,6 +1928,9 @@ def main():
             report, changed = panel.sync(monitor, tracker)
             dirty = dirty or changed
             now = time.monotonic()
+            while not button_actions.empty():
+                if alerts.action(button_actions.get(), now) == 'restart':
+                    client.publish(base + '/bridge/request/restart', '', qos=1)
             tracker.observe(report, monitor.bridge, now)
             tracker.tick(now)
             if JOURNAL.version != journal_version:
@@ -1519,6 +1939,7 @@ def main():
                 payload = monitor.report()
                 journal_version = JOURNAL.version
                 payload['recent_events'] = list(JOURNAL.recent)
+                payload['general_failure'] = alerts.general is not None
                 panel.set(payload)
                 info = client.publish(STATUS, json.dumps(payload, ensure_ascii=False), qos=1, retain=True)
                 if info.rc != mqtt.MQTT_ERR_SUCCESS:
@@ -1593,7 +2014,7 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 td.when { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
 td.msg { overflow-wrap: anywhere; }
 .kind { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
-.kind.OK { color: var(--ok); background: var(--ok-bg); }
+.kind.OK, .kind.RECOVERED { color: var(--ok); background: var(--ok-bg); }
 .kind.PROBLEM { color: var(--bad); background: var(--bad-bg); }
 .kind.NO_DATA { color: var(--warn); background: var(--warn-bg); }
 .kind.Z2M { color: var(--z2m); background: var(--z2m-bg); }
@@ -1609,6 +2030,9 @@ td.msg { overflow-wrap: anywhere; }
 .tab:hover { background: none; color: var(--text); }
 .banner { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .banner b { flex: 1; min-width: 200px; }
+.banner.alert { background: var(--bad-bg); color: var(--bad); }
+button.primary.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+button.primary.danger:hover { background: var(--bad); opacity: .9; }
 button.primary { background: var(--info); color: #fff; border-color: var(--info); }
 button.primary:hover { background: var(--info); opacity: .9; }
 button.neutral { color: var(--text); border-color: var(--line); }
@@ -1653,6 +2077,10 @@ button:disabled { opacity: .45; cursor: default; }
       <button class="primary" id="setup-all"></button>
     </div>
     <div class="banner hidden" id="availability-off"><b data-t="availability_banner"></b></div>
+    <div class="banner alert hidden" id="general">
+      <b data-t="general_banner"></b>
+      <button class="primary danger" id="restart-z2m" data-t="restart_z2m"></button>
+    </div>
     <section class="card">
       <div class="status">
         <span class="badge none" id="state"></span>
@@ -1707,7 +2135,7 @@ button:disabled { opacity: .45; cursor: default; }
 </main>
 <script>
 const T = __TEXTS__;
-const TYPES = ['OK', 'PROBLEM', 'NO_DATA', 'Z2M', 'MQTT', 'NOTIFY', 'SYSTEM'];
+const TYPES = ['OK', 'RECOVERED', 'PROBLEM', 'NO_DATA', 'Z2M', 'MQTT', 'NOTIFY', 'SYSTEM'];
 let events = [];
 let devices = null;
 const checked = { w: new Set(), u: new Set() };
@@ -1757,6 +2185,7 @@ function renderStatus(s) {
   const noDevices = s.reason === 'no_devices';
   $('setup').classList.toggle('hidden', !noDevices);
   $('availability-off').classList.toggle('hidden', s.z2m_availability !== false);
+  $('general').classList.toggle('hidden', !s.general_failure);
   const lists = $('lists');
   lists.replaceChildren();
   if (noDevices) { lists.append(el('div', 'muted', T.reason_no_devices)); }
@@ -1926,6 +2355,16 @@ $('unwatch').addEventListener('click', () => {
   if (gone.length) text += '\n\n' + fmt(T.confirm_unwatch_missing, { names: gone.join(', ') });
   if (!confirm(text)) return;
   changeDevices([], [...checked.w]);
+});
+$('restart-z2m').addEventListener('click', async () => {
+  if (!confirm(T.confirm_restart)) return;
+  try {
+    const r = await fetch('api/restart', { method: 'POST', headers: { 'X-Zigbee-Monitor': 'restart' } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch (err) {
+    alert(fmt(T.restart_failed, { error: err.message }));
+  }
+  load();
 });
 $('clear').addEventListener('click', async () => {
   if (!confirm(T.confirm_clear)) return;

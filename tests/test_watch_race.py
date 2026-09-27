@@ -32,11 +32,12 @@ def setup():
     sent, lines = [], []
     class Notifier:
         targets = ['notify.x']
-        def send(self, msg): sent.append(msg)
-    alerts = m.Alerts(Notifier(), {'Lamp', 'Leak'}, path=Path(tempfile.mkdtemp()) / 'a.json', delay=120)
+        def send(self, msg, extra=None): sent.append(msg)
+    alerts = m.Alerts(Notifier(), {'Lamp', 'Leak'}, path=Path(tempfile.mkdtemp()) / 'a.json', delay=120, group=0)
     tracker = m.EventTracker(write=lambda k, msg: lines.append((k, msg)), settle_mqtt=0, alerts=alerts)
     tracker.mqtt_up(0)
     tracker.observe(mon.report(), 'online', 1)
+    tracker.tick(1)
     return store, mon, tracker, sent, lines
 
 # 1. The panel cannot save a change while the main loop is taking its report.
@@ -53,6 +54,7 @@ check('change saved and queued afterwards', B not in store.watched and not panel
 # 2. The next sync applies the change before reporting: no false recovery.
 report, changed = panel.sync(mon, tracker)
 tracker.observe(report, 'online', 2)
+tracker.tick(2)
 check('sync reports the change', changed)
 check('history: no "Recovered"', not any('Recovered' in msg for _, msg in lines), lines)
 check('history: full line after the change', lines[-1] == ('OK', 'The only watched device is online'), lines[-2:])
@@ -69,6 +71,7 @@ for _ in range(200):
         while not stop.is_set():
             report, _ = panel.sync(mon, tracker)
             tracker.observe(report, 'online', n)
+            tracker.tick(n)
             n += 1
     loop = threading.Thread(target=main_loop)
     loop.start()
@@ -78,6 +81,7 @@ for _ in range(200):
     loop.join(2)
     report, _ = panel.sync(mon, tracker)
     tracker.observe(report, 'online', 10**6)
+    tracker.tick(10**6)
     if any('Recovered' in msg for msg in sent):
         false_recoveries += 1
 check('200 concurrent runs: never a false recovery', false_recoveries == 0, false_recoveries)

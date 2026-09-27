@@ -94,10 +94,10 @@ check('activada otra vez: vuelve a la normalidad', r['state'] == 'PROBLEM' and '
 class FakeNotifier:
     targets = ['notify.x']
     def __init__(self): self.sent = []
-    def send(self, msg): self.sent.append(msg)
+    def send(self, msg, extra=None): self.sent.append(msg)
 log = []
 n = FakeNotifier()
-alerts = m.Alerts(n, {'Luz A', 'Sensor B'}, path=Path(TMP) / 'al.json', delay=120)
+alerts = m.Alerts(n, {'Luz A', 'Sensor B'}, path=Path(TMP) / 'al.json', delay=120, group=0)
 tr = m.EventTracker(write=lambda k, msg: log.append((k, msg)), settle_mqtt=0, settle_z2m=0, alerts=alerts)
 tr.mqtt_up(0); log.clear()
 def pay(avail):
@@ -111,7 +111,7 @@ tr.observe(pay(False), 'online', 2)
 tr.observe(pay(False), 'online', 3)
 check('una línea al detectarla', [x for x in log if x[0] == 'SYSTEM'] == [('SYSTEM', m.t('availability_off'))], log)
 check('una sola notificación', n.sent.count(m.t('alert_availability')) == 1, n.sent)
-alerts2 = m.Alerts(n, {'Luz A', 'Sensor B'}, path=Path(TMP) / 'al.json', delay=120)
+alerts2 = m.Alerts(n, {'Luz A', 'Sensor B'}, path=Path(TMP) / 'al.json', delay=120, group=0)
 tr2 = m.EventTracker(write=lambda k, msg: log.append((k, msg)), settle_mqtt=0, alerts=alerts2)
 tr2.mqtt_up(0); tr2.observe(pay(False), 'online', 1)
 check('tras reiniciar el monitor no se repite la notificación', n.sent.count(m.t('alert_availability')) == 1, n.sent)
@@ -138,7 +138,7 @@ m.DATA = data; m.OPTIONS = data / 'options.json'; m.DEVICES = data / 'devices.js
 m.EVENTS = data / 'eventos.log'; m.ALERTS = data / 'notificados.json'
 m.DeviceStore.__init__.__defaults__ = (m.DEVICES,)
 m.Journal.__init__.__defaults__ = (m.EVENTS,)
-m.Alerts.__init__.__defaults__ = (m.ALERTS, None)
+m.Alerts.__init__.__defaults__ = (m.ALERTS, None, None)
 m.SETTLE_MQTT = 1
 m.OPTIONS.write_text(json.dumps({'mqtt_tls': False, 'z2m_base_topic': 'casa/z2m', 'language': 'es',
                                  'mqtt_discovery': True, 'notify_targets': ['notify.x']}))

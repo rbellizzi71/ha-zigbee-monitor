@@ -71,14 +71,14 @@ m.journal_write = lambda k, msg: lines.append((k, msg))
 class FakeNotifier:
     targets = ['notify.x']
     def __init__(self): self.sent = []
-    def send(self, msg): self.sent.append(msg)
+    def send(self, msg, extra=None): self.sent.append(msg)
 def payload(off=(), miss=(), expected=3, reason=None):
     p = {'state': 'PROBLEM' if off or miss else 'OK', 'expected': expected, 'offline_names': sorted(off), 'missing_names': sorted(miss),
          'unknown_names': [], 'data_valid': True}
     if reason:
         p.update(state='NO_DATA', reason=reason)
     return p
-n = FakeNotifier(); al = m.Alerts(n, {'Luz A', 'Sensor B'}, path=Path(TMP) / 'n.json')
+n = FakeNotifier(); al = m.Alerts(n, {'Luz A', 'Sensor B'}, path=Path(TMP) / 'n.json', group=0)
 log = []
 tr = m.EventTracker(write=lambda k, msg: log.append((k, msg)), settle_mqtt=0, alerts=al)
 tr.mqtt_up(0); log.clear()
@@ -89,12 +89,12 @@ tr.observe(payload(expected=0, reason='no_devices'), 'online', 2)
 check('no repite el aviso', len(n.sent) == 1)
 log.clear(); n.sent.clear()
 tr.watch_list_changed([])
-tr.observe(payload(off=['Sensor B'], expected=2), 'online', 3)
+tr.observe(payload(off=['Sensor B'], expected=2), 'online', 3); tr.tick(3)
 check('tras elegir: línea completa y aviso del offline', log == [('PROBLEM', 'Offline (1): Sensor B')] and
       n.sent == ['Nuevo offline: Sensor B · Total: 1 offline, 0 desaparecidos'], (log, n.sent))
 log.clear(); n.sent.clear()
 tr.watch_list_changed(['Sensor B'])
-tr.observe(payload(expected=1), 'online', 4)
+tr.observe(payload(expected=1), 'online', 4); tr.tick(4)
 check('dejar de vigilar un offline: sin "Recuperado"', log == [('OK', 'El único dispositivo vigilado está en línea')] and n.sent == [], (log, n.sent))
 tr.watch_list_changed(['Luz A'])
 tr.observe(payload(expected=0, reason='no_devices'), 'online', 5)

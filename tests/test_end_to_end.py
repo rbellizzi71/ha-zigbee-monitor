@@ -5,7 +5,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TMP = tempfile.mkdtemp()
-os.environ.update(ZM_DATA=TMP, ZM_SETTLE_Z2M='3', ZM_PANEL_PORT='18699')
+os.environ.update(ZM_DATA=TMP, ZM_SETTLE_Z2M='3', ZM_PANEL_PORT='18699', ZM_NOTIFY_GROUP='1')
 sys.path.insert(0, str(HERE / 'fakepaho'))
 sys.path.insert(0, str(HERE.parent / 'zigbee_monitor'))
 import paho.mqtt.client as fake

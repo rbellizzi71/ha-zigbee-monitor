@@ -125,8 +125,10 @@ The full status is also published, retained, on the MQTT topic `zigbee_monitor/s
 
 Notifications are sent only when something changes, never repeatedly for the same problem:
 
-- A watched device goes offline, goes missing, or recovers. Several changes at once arrive in a
-  single message, with the totals.
+- A watched device goes offline, goes missing, or recovers. These are grouped: each change waits
+  20 seconds for more, and when devices stop changing a single message tells the net result, with
+  names and totals. A device that drops and comes back within the wait is not notified.
+- A **general failure**: five or more devices lost within a minute, or one after another. See below.
 - Zigbee2MQTT has been offline for more than 2 minutes, and when it is back. A planned restart of
   Zigbee2MQTT that takes less than 2 minutes sends nothing.
 - Zigbee Monitor has lost its MQTT connection for more than 2 minutes, and when it recovers.
@@ -136,6 +138,37 @@ Notifications are sent only when something changes, never repeatedly for the sam
 After Zigbee2MQTT restarts, devices reconnect gradually. Zigbee Monitor waits 2 minutes for the network
 to settle and then notifies only the real difference from before the restart.
 
+### General failure
+
+When five or more watched devices are lost within a minute (or one right after another), one
+message says so at once, with the number of devices but no names: a possible problem with the
+coordinator, a router or something else. While the failure lasts, nothing is notified device by
+device (the panel and the history still show everything). It ends with one *Network stable*
+message, which replaces the failure notification on the phone:
+
+- right away, when the network is back as it was before the failure;
+- otherwise 2 minutes after the last reconnection (10 minutes at most), naming what is still offline.
+
+The panel shows the failure with a **Restart Zigbee2MQTT** button.
+
+### Notification buttons
+
+With the Home Assistant Companion app (`notify.mobile_app_...` targets), the general-failure
+notification has three buttons. No automation is needed:
+
+- **Restart Zigbee2MQTT**: Zigbee Monitor asks Zigbee2MQTT to restart (useful when it lost the
+  coordinator and does not recover by itself). You get a confirmation, and later the *Network stable*
+  message.
+- **Wait 10 min**: if the devices are still down after 10 minutes, the notification comes back.
+- **Open Home Assistant**: opens the app on your main dashboard; Zigbee Monitor is in the sidebar.
+  (The app cannot open an add-on panel straight from a notification.)
+
+Tapping any button closes the notification (that is how phones work); the panel keeps its own
+restart button. Buttons older than one hour are ignored. Other notification targets receive the same
+message without buttons.
+
+The history in the panel is not grouped: it records every change the moment it happens.
+
 Zigbee Monitor remembers what it already notified, so restarting the add-on does not repeat alerts.
 
 ## History
@@ -144,7 +177,8 @@ The panel's history records transitions only. Each line has a type:
 
 | Type | Used for |
 |---|---|
-| **OK** / **Problem** / **No data** | The state of the watched devices changed. |
+| **OK** / **Problem** / **No data** | The state of the watched devices changed (*Problem*: something was lost). |
+| **Recovered** | Devices came back and none was lost. Also written for each device that reconnects while Zigbee2MQTT settles after a restart. |
 | **Z2M** | Zigbee2MQTT went offline, came back, and finished reconnecting. |
 | **MQTT** | Zigbee Monitor connected to, lost or recovered the MQTT broker. |
 | **Notify** | A notification was sent, or failed to send. |
