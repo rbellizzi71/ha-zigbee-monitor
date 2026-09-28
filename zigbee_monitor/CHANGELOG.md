@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.1-beta.2
+## 1.2.1
 
 - Fix: a device that left and rejoined the network, was re-paired or was renamed could stay
   *No data* indefinitely (and an offline state reported at that moment was missed). The monitor

@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = '1.2.1-beta.2'
+VERSION = '1.2.1'
 DATA = Path(os.environ.get('ZM_DATA', '/data'))
 OPTIONS = DATA / 'options.json'
 DEVICES = DATA / 'devices.json'
