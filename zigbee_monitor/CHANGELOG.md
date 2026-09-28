@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1-beta.1
+
+- Fix: a device that left and rejoined the network, was re-paired or was renamed could stay
+  *No data* indefinitely (and an offline state reported at that moment was missed). Zigbee2MQTT
+  reports its availability before the updated device list, and that report was discarded.
+
 ## 1.2.0
 
 - General failure: five devices lost within a minute (or one after another) are announced at
