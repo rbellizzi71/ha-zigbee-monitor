@@ -1,10 +1,12 @@
 # Changelog
 
-## 1.2.1-beta.1
+## 1.2.1-beta.2
 
 - Fix: a device that left and rejoined the network, was re-paired or was renamed could stay
-  *No data* indefinitely (and an offline state reported at that moment was missed). Zigbee2MQTT
-  reports its availability before the updated device list, and that report was discarded.
+  *No data* indefinitely (and an offline state reported at that moment was missed). The monitor
+  discarded the device's availability when the device list changed, and Zigbee2MQTT does not
+  always publish it again (never when a device leaves and rejoins by itself). Zigbee2MQTT itself
+  clears the availability of renamed and removed devices, so it is no longer discarded.
 
 ## 1.2.0
 

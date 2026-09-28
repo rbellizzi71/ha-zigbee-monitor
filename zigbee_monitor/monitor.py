@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = '1.2.1-beta.1'
+VERSION = '1.2.1-beta.2'
 DATA = Path(os.environ.get('ZM_DATA', '/data'))
 OPTIONS = DATA / 'options.json'
 DEVICES = DATA / 'devices.json'
@@ -401,16 +401,11 @@ class Monitor:
         with self.lock:
             if topic == base + 'bridge/devices':
                 try:
-                    new = snapshot(payload)
-                    # Invalidate names no device uses any more (renamed or removed). Never the new
-                    # name: Z2M publishes its availability before the snapshot (rejoin, rename),
-                    # and passive devices do not repeat it.
-                    if self.actual is not None:
-                        names = set(new.values())
-                        for ieee, name in self.actual.items():
-                            if new.get(ieee) != name and name not in names:
-                                self.availability.pop(name, None)
-                    self.actual = new
+                    # Availability is never discarded here: Z2M clears the retained topic itself
+                    # when a device is renamed or removed, and does not publish it again when a
+                    # device leaves and rejoins, or when its availability arrives before the new
+                    # snapshot.
+                    self.actual = snapshot(payload)
                     self.invalid = False
                     return True
                 except (ValueError, TypeError, UnicodeError):
