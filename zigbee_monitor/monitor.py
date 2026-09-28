@@ -402,10 +402,13 @@ class Monitor:
             if topic == base + 'bridge/devices':
                 try:
                     new = snapshot(payload)
-                    # Invalidate old names on rename/reassignment.
+                    # Invalidate names no device uses any more (renamed or removed). Never the new
+                    # name: Z2M publishes its availability before the snapshot (rejoin, rename),
+                    # and passive devices do not repeat it.
                     if self.actual is not None:
-                        for ieee, name in new.items():
-                            if self.actual.get(ieee) != name:
+                        names = set(new.values())
+                        for ieee, name in self.actual.items():
+                            if new.get(ieee) != name and name not in names:
                                 self.availability.pop(name, None)
                     self.actual = new
                     self.invalid = False
