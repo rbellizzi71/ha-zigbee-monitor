@@ -6,7 +6,8 @@ name: Release
 # 2. The add-on images are built and pushed:
 #      ghcr.io/<owner>/{amd64,aarch64}-addon-zigbee_monitor:X.Y.Z (and :latest, except for
 #      pre-releases such as X.Y.Z-beta.N)
-# 3. A GitHub release is created with the notes of that version in CHANGELOG.md.
+# 3. A GitHub release is created with the notes of that version in CHANGELOG.md (a release
+#    created by hand on github.com, which also creates the tag, is updated instead).
 # A pre-release for testing is built by running this workflow by hand on its branch.
 
 on:
@@ -83,10 +84,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create the GitHub release
+      - name: Create or update the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           awk -v v="## $VERSION" '$0 == v {found=1; next} found && /^## / {exit} found' zigbee_monitor/CHANGELOG.md > notes.md
-          gh release create "v$VERSION" --title "$VERSION" --notes-file notes.md --verify-tag
+          # A release created by hand on github.com (which also creates the tag) is updated
+          # with the CHANGELOG notes instead of failing the run.
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            gh release edit "v$VERSION" --title "$VERSION" --notes-file notes.md
+          else
+            gh release create "v$VERSION" --title "$VERSION" --notes-file notes.md --verify-tag
+          fi

@@ -210,7 +210,8 @@ srv.shutdown()
 m.DATA = Path(tempfile.mkdtemp()); m.OPTIONS = m.DATA / 'options.json'
 m.DeviceStore.__init__.__defaults__ = (m.DATA / 'devices.json',)
 m.Journal.__init__.__defaults__ = (m.DATA / 'eventos.log',)
-m.Alerts.__init__.__defaults__ = (m.DATA / 'notificados.json', None, None)
+m.Alerts.__init__.__defaults__ = (m.DATA / 'notificados.json', None, None, None)
+m.Settings.__init__.__defaults__ = (m.DATA / 'settings.json',)
 m.NOTIFY_GROUP = 1
 m.OPTIONS.write_text(json.dumps({'mqtt_host': 'broker', 'mqtt_tls': False, 'language': 'es', 'mqtt_discovery': False,
                                  'notify_targets': ['notify.mobile_app_x']}))

@@ -135,10 +135,11 @@ check('sin tipos legacy', 'STATE' not in json.dumps(m.PANEL_TEXTS) and m.parse_e
 # ---------- end to end: automatic MQTT, custom base topic, availability disabled then enabled ----------
 data = Path(tempfile.mkdtemp())
 m.DATA = data; m.OPTIONS = data / 'options.json'; m.DEVICES = data / 'devices.json'
-m.EVENTS = data / 'eventos.log'; m.ALERTS = data / 'notificados.json'
+m.EVENTS = data / 'eventos.log'; m.ALERTS = data / 'notificados.json'; m.SETTINGS = data / 'settings.json'
 m.DeviceStore.__init__.__defaults__ = (m.DEVICES,)
 m.Journal.__init__.__defaults__ = (m.EVENTS,)
-m.Alerts.__init__.__defaults__ = (m.ALERTS, None, None)
+m.Alerts.__init__.__defaults__ = (m.ALERTS, None, None, None)
+m.Settings.__init__.__defaults__ = (m.SETTINGS,)
 m.SETTLE_MQTT = 1
 m.OPTIONS.write_text(json.dumps({'mqtt_tls': False, 'z2m_base_topic': 'casa/z2m', 'language': 'es',
                                  'mqtt_discovery': True, 'notify_targets': ['notify.x']}))
@@ -167,7 +168,7 @@ m.main()
 lines = [l.split(' | ', 2)[1:] for l in m.EVENTS.read_text().splitlines()]
 for l in lines:
     print('   ', l)
-check('arranque: MQTT automático y tema base', lines[0] == ['SYSTEM', 'Monitor iniciado (v%s): 2 dispositivos vigilados, 1 destino de notificación · MQTT: automático · Z2M: casa/z2m' % m.VERSION], lines[0])
+check('arranque: MQTT automático y tema base', lines[0] == ['SYSTEM', 'Monitor iniciado (v%s): 2 dispositivos vigilados, 1 destino de notificación · MQTT: automático · Z2M: casa/z2m · Notificaciones: todas' % m.VERSION], lines[0])
 check('conectó al broker de HA con sus credenciales', fake.CONNECTS[0] == ('core-mosquitto', 1883, 'addons'), fake.CONNECTS)
 check('suscrito solo al tema base', 'services/mqtt' in SUP)
 body = [x[1] for x in lines]

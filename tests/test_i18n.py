@@ -24,7 +24,7 @@ for key in m.MESSAGES['en']:
         check('clave %s coherente en es/en' % key, False, (es, en))
 check('catálogos completos', set(m.MESSAGES['es']) == set(m.MESSAGES['en']) and set(m.PANEL_TEXTS['es']) == set(m.PANEL_TEXTS['en']))
 off = m.discovery_messages(False)
-check('descubrimiento desactivado = 4 mensajes vacíos (borra entidades)', len(off) == 4 and all(p == '' for _, p in off), off)
+check('descubrimiento desactivado = 7 mensajes vacíos (borra entidades)', len(off) == 7 and all(p == '' for _, p in off), off)
 m.LANG = 'es'
 on = dict(m.discovery_messages(True, 'local_zigbee_monitor'))
 dev = json.loads(on['homeassistant/sensor/zigbee_monitor/status/config'])['device']
