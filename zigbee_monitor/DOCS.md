@@ -85,6 +85,56 @@ Two lists, with search, checkboxes and *select all / none*:
 New devices are **never watched automatically**: a line in the history tells you one appeared, and you
 decide whether to watch it. Names always follow Zigbee2MQTT: renaming a device there renames it here.
 
+### Traffic tab
+
+How many messages Zigbee2MQTT publishes for each device, to find the "chatty" ones (radar presence
+sensors, for example, can send more than one message per second).
+
+- Periods: **last hour**, **day**, **week**, **month**.
+- Every Zigbee2MQTT device, tagged **Watched** or **Not watched**, sorted from most to least
+  messages, with messages per minute, share of the total and a bar.
+- Only counts are stored, never the messages: per minute for the last hour (memory) and per hour
+  for 31 days (`/data/traffic.json`, a few hundred KB at most, saved every 5 minutes). Devices are
+  tracked by IEEE address, so a rename keeps their history.
+- "Data since …" tells when counting started; a notice appears when the monitor was not running
+  for part of the period.
+- A message is each update Zigbee2MQTT publishes for the device: a good measure of what reaches
+  MQTT and Home Assistant, not of the raw Zigbee radio traffic.
+
+### Incidents tab
+
+An automatic report of every **general failure** and every time **Zigbee2MQTT is down for more
+than 2 minutes**, so you do not have to be watching the logs when it happens. It is recorded even
+when those notifications are turned off.
+
+Each report contains:
+
+- start, end, duration and how it ended: *recovered by itself*, *after a restart* (Zigbee2MQTT
+  restarted or a restart was requested), *not recovered* (still down after 6 hours; a later
+  recovery is noted), or *during an interruption* (it recovered while Zigbee Monitor was stopped);
+- the affected devices, when each one dropped and came back;
+- the coordinator (type, firmware revision, adapter, port) as reported by Zigbee2MQTT;
+- the **10 minutes before**: Zigbee2MQTT warnings and errors (e.g. `SRSP - SYS - ping`),
+  availability changes, Zigbee2MQTT state and health reports, MQTT connection, messages per minute,
+  the busiest devices and the last message received before the silence;
+- a timeline of everything during the incident, including actions (restart, *Wait 10 min*);
+- optionally, the values of Home Assistant entities of your coordinator at the start and the end
+  (chosen in the *Settings* tab), e.g. to see whether it rebooted or overheated.
+
+Only relevant facts are kept: messages of chatty devices and Zigbee2MQTT's *info* lines are just
+counted, and each part has a size limit (the newest lines are kept and the report says how many
+were dropped). Zigbee2MQTT publishes its warnings and errors on `bridge/logging` with its default
+log level (*info*); with a higher level there is less context.
+
+The tab shows a summary (number of incidents, mean time between them, most frequent hours, errors
+that repeat before incidents), the list and the detail of each report. Reports can be **downloaded**
+(JSON) or **deleted**, one by one or all together; deleting writes a line in the history. The last
+**30** are kept in `/data/incidents/`. Reports contain your device names: review them before sharing
+them publicly.
+
+An open incident is saved within seconds of every change, so a Home Assistant restart or a power
+cut does not lose it: when Zigbee Monitor starts again it continues the report and notes the gap.
+
 ### Settings tab
 
 **Notifications**: choose which alerts reach your notification targets. A change applies at once,
@@ -107,6 +157,10 @@ with no restart, is kept across restarts and updates, and writes a *System* line
 - The same three settings are Home Assistant switches (see *Entities*).
 - They only matter when `notify_targets` has at least one target; otherwise the tab says so.
 - The start line in the history lists the active notifications, e.g. *Notifications: all*.
+
+**Incidents**: up to 10 Home Assistant entities of your coordinator (comma separated, e.g. its
+temperature or uptime sensors) whose values are saved at the start and end of each incident.
+Entities that do not exist are rejected.
 
 ### What the statuses mean
 
@@ -217,9 +271,13 @@ The panel's history records transitions only. Each line has a type:
 | **Z2M** | Zigbee2MQTT went offline, came back, and finished reconnecting. |
 | **MQTT** | Zigbee Monitor connected to, lost or recovered the MQTT broker. |
 | **Notify** | A notification was sent, or failed to send. |
-| **System** | Start and stop, watch-list changes, new devices in Zigbee2MQTT, availability setting, history cleared. |
+| **System** | Start and stop, unexpected stops (power cut, hang, forced restart), watch-list changes, new devices in Zigbee2MQTT, availability setting, setting changes, incidents recorded or deleted, history cleared. |
 
 The history keeps about 3 MB (a 1 MB file plus two older copies) and survives restarts and updates.
+
+**Unexpected stops**: when Zigbee Monitor starts after it was not stopped in an orderly way (power
+cut, hang, forced restart), a *System* line tells when it stopped working (it saves a sign of life
+every minute).
 
 ## Example automation
 

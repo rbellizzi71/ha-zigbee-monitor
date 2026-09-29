@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.0
+
+- New **Traffic** tab: messages Zigbee2MQTT publishes for each device in the last hour, day, week or
+  month, busiest first, with the Watched / Not watched tag. Only counts are stored (hourly, 31 days).
+- New **Incidents** tab: an automatic report of every general failure and every Zigbee2MQTT outage
+  longer than 2 minutes, even with those notifications off. Each report has the affected devices,
+  the coordinator, the 10 minutes before (Zigbee2MQTT warnings and errors, health, traffic, last
+  message), a timeline and how it ended. Summary of all incidents, download and delete one or all;
+  the last 30 are kept. Reports survive restarts and power cuts. A history line is written for each
+  incident.
+- Settings tab: Home Assistant entities of the coordinator saved in each incident.
+- Unexpected stops (power cut, hang, forced restart) are reported in the history at the next start.
+- Tab bar scrolls on narrow screens; tab order Status · Devices · Traffic · Incidents · Settings.
+
 ## 1.3.0
 
 - New **Settings** tab in the panel: choose which notifications are sent (devices, general failure,
