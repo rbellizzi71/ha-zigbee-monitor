@@ -3,9 +3,25 @@
 A Home Assistant add-on that watches your **Zigbee2MQTT** devices and alerts you when one goes
 **offline** or **disappears** from your network.
 
-![Status tab](images/panel.png)
+**Status**: the state of your watched devices and the history of every change.
+
+![Status tab](images/status.png)
+
+**Devices**: choose what to watch; devices with a problem come first.
 
 ![Devices tab](images/devices.png)
+
+**Traffic**: which devices send the most messages.
+
+![Traffic tab](images/traffic.png)
+
+**Incidents**: an automatic report of every general failure, with what happened before, during and after.
+
+![Incidents tab](images/incidents.png)
+
+**Settings**: choose which notifications you get, live.
+
+![Settings tab](images/settings.png)
 
 ## Features
 
