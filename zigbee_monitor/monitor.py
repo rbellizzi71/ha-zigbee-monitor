@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = '1.3.0'
+VERSION = '1.4.0'
 DATA = Path(os.environ.get('ZM_DATA', '/data'))
 OPTIONS = DATA / 'options.json'
 DEVICES = DATA / 'devices.json'
@@ -380,6 +380,15 @@ class Monitor:
         self.availability_on = None  # from bridge/info: True, False or None (unknown)
         self.bridge = None
         self.invalid = False
+        self.by_name = {}
+
+    def ieee_of(self, name):
+        with self.lock:
+            return self.by_name.get(name)
+
+    def name_of(self, ieee):
+        with self.lock:
+            return (self.actual or {}).get(ieee) or self.store.names.get(ieee) or ieee
 
     @property
     def expected(self):
@@ -411,6 +420,7 @@ class Monitor:
                     # device leaves and rejoins, or when its availability arrives before the new
                     # snapshot.
                     self.actual = snapshot(payload)
+                    self.by_name = {name: ieee for ieee, name in self.actual.items()}
                     self.invalid = False
                     return True
                 except (ValueError, TypeError, UnicodeError):
@@ -611,6 +621,29 @@ MESSAGES = {
         'kind_devices': 'dispositivos', 'kind_general': 'fallo general', 'kind_system': 'sistema',
         'notify_all': 'Notificaciones: todas', 'notify_none': 'Notificaciones: todas desactivadas',
         'notify_some': 'Notificaciones: {on} ({off}: desactivadas)',
+        'log_heartbeat_failed': 'No se pudo guardar la señal de vida',
+        'log_traffic_save_failed': 'No se pudieron guardar las estadísticas de tráfico',
+        'log_incidents_dir_failed': 'No se pudo crear la carpeta de incidentes',
+        'log_incident_save_failed': 'No se pudo guardar el informe de incidente',
+        'unexpected_stop': 'Parada inesperada detectada: Zigbee Monitor dejó de funcionar hacia las {time} (corte de luz, bloqueo o reinicio forzado)',
+        'dur_s': '{s} s', 'dur_m': '{m} min', 'dur_hm': '{h} h {m} min',
+        'inc_mqtt_up': 'Conectado al broker MQTT', 'inc_mqtt_down': 'Conexión MQTT perdida',
+        'inc_z2m_online': 'Zigbee2MQTT online', 'inc_z2m_offline': 'Zigbee2MQTT offline',
+        'inc_z2m_restarted': 'Zigbee2MQTT se reinició (su tiempo en marcha volvió a cero)',
+        'inc_health': 'Salud de Zigbee2MQTT: en marcha {uptime}, memoria {memory} MB, carga {load}, cola MQTT {queued}',
+        'inc_missing': '{name}: desaparecido de Zigbee2MQTT',
+        'inc_gap': 'Zigbee Monitor sin funcionar de {start} a {end} (corte de luz o reinicio): sin datos en ese intervalo',
+        'inc_opened_general': 'Incidente abierto: fallo general',
+        'inc_opened_z2m': 'Incidente abierto: Zigbee2MQTT caído',
+        'inc_trigger_general': 'fallo general', 'inc_trigger_z2m': 'Zigbee2MQTT caído',
+        'inc_outcome_self': 'recuperado solo', 'inc_outcome_restart': 'recuperado tras reinicio',
+        'inc_outcome_not_recovered': 'no recuperado', 'inc_outcome_interruption': 'recuperado durante una interrupción del monitor',
+        'inc_restart_requested': 'Reinicio de Zigbee2MQTT solicitado', 'inc_wait': 'Botón "Esperar 10 min" pulsado',
+        'incident_recorded': 'Incidente registrado: {trigger}, {duration}, {outcome}',
+        'incidents_deleted_one': 'Informe de incidente borrado',
+        'incidents_deleted_other': '{n} informes de incidentes borrados',
+        'entities_changed': 'Entidades del coordinador para los incidentes: {entities}',
+        'entities_none': 'ninguna',
     },
     'en': {
         'started_one': 'Monitor started (v{version}): {n} watched devices, {t} notification target · MQTT: {mqtt} · Z2M: {base}',
@@ -708,6 +741,29 @@ MESSAGES = {
         'kind_devices': 'devices', 'kind_general': 'general failure', 'kind_system': 'system',
         'notify_all': 'Notifications: all', 'notify_none': 'Notifications: all off',
         'notify_some': 'Notifications: {on} ({off}: off)',
+        'log_heartbeat_failed': 'Could not save the heartbeat',
+        'log_traffic_save_failed': 'Could not save the traffic statistics',
+        'log_incidents_dir_failed': 'Could not create the incidents folder',
+        'log_incident_save_failed': 'Could not save the incident report',
+        'unexpected_stop': 'Unexpected stop detected: Zigbee Monitor stopped working around {time} (power cut, hang or forced restart)',
+        'dur_s': '{s} s', 'dur_m': '{m} min', 'dur_hm': '{h} h {m} min',
+        'inc_mqtt_up': 'Connected to the MQTT broker', 'inc_mqtt_down': 'MQTT connection lost',
+        'inc_z2m_online': 'Zigbee2MQTT online', 'inc_z2m_offline': 'Zigbee2MQTT offline',
+        'inc_z2m_restarted': 'Zigbee2MQTT restarted (its uptime went back to zero)',
+        'inc_health': 'Zigbee2MQTT health: up {uptime}, memory {memory} MB, load {load}, MQTT queue {queued}',
+        'inc_missing': '{name}: missing from Zigbee2MQTT',
+        'inc_gap': 'Zigbee Monitor not running from {start} to {end} (power cut or restart): no data for that interval',
+        'inc_opened_general': 'Incident opened: general failure',
+        'inc_opened_z2m': 'Incident opened: Zigbee2MQTT down',
+        'inc_trigger_general': 'general failure', 'inc_trigger_z2m': 'Zigbee2MQTT down',
+        'inc_outcome_self': 'recovered by itself', 'inc_outcome_restart': 'recovered after a restart',
+        'inc_outcome_not_recovered': 'not recovered', 'inc_outcome_interruption': 'recovered while the monitor was stopped',
+        'inc_restart_requested': 'Zigbee2MQTT restart requested', 'inc_wait': '"Wait 10 min" button tapped',
+        'incident_recorded': 'Incident recorded: {trigger}, {duration}, {outcome}',
+        'incidents_deleted_one': 'Incident report deleted',
+        'incidents_deleted_other': '{n} incident reports deleted',
+        'entities_changed': 'Coordinator entities for incidents: {entities}',
+        'entities_none': 'none',
     },
 }
 
@@ -726,6 +782,44 @@ PANEL_TEXTS = {
         'confirm_clear': '¿Seguro que quieres borrar todo el historial de eventos? Esta acción no se puede deshacer.',
         'clear_failed': 'No se pudo borrar el historial: {error}',
         'tab_status': 'Estado', 'tab_devices': 'Dispositivos', 'tab_settings': 'Ajustes',
+        'tab_traffic': 'Tráfico', 'tab_incidents': 'Incidentes',
+        'periods': {'hour': 'Última hora', 'day': 'Día', 'week': 'Semana', 'month': 'Mes'},
+        'traffic_help': 'Mensajes que Zigbee2MQTT publica de cada dispositivo (solo se cuentan, no se guardan). De más a menos.',
+        'traffic_total': '{total} mensajes · {per_min} por minuto · {n} dispositivos',
+        'traffic_since': 'Datos desde {since}',
+        'traffic_coverage': 'El monitor funcionó en el {pct}% de este periodo: los totales pueden ser menores que los reales.',
+        'traffic_empty': 'Todavía no hay mensajes contados en este periodo.',
+        'col_device': 'Dispositivo', 'col_messages': 'Mensajes', 'col_per_min': 'Por min', 'col_pct': '%',
+        'tag_watched': 'VIGILADO', 'tag_unwatched': 'NO VIGILADO',
+        'inc_help': 'Informe automático de cada fallo general o caída de Zigbee2MQTT: qué pasó antes, durante y después. Se guardan los últimos 30.',
+        'inc_count': '{n} incidentes', 'inc_interval': 'uno cada {d} de media', 'inc_mean_duration': 'duración media {d}',
+        'inc_hours': 'Horas más frecuentes: {hours}', 'inc_repeated': 'Errores que se repiten antes de los incidentes',
+        'inc_empty': 'Sin incidentes registrados.',
+        'download_all': 'Descargar todos', 'delete_all': 'Borrar todos', 'download': 'Descargar', 'delete': 'Borrar',
+        'confirm_delete': '¿Borrar este informe de incidente?', 'confirm_delete_all': '¿Borrar todos los informes de incidentes cerrados?',
+        'delete_failed': 'No se pudo borrar: {error}',
+        'col_date': 'Fecha', 'col_trigger': 'Tipo', 'col_duration': 'Duración', 'col_outcome': 'Resultado', 'col_affected': 'Afectados',
+        'triggers': {'general': 'Fallo general', 'z2m': 'Zigbee2MQTT caído'},
+        'outcomes': {'self': 'RECUPERADO SOLO', 'restart': 'TRAS REINICIO', 'not_recovered': 'NO RECUPERADO',
+                     'interruption': 'DURANTE INTERRUPCIÓN', 'open': 'EN CURSO'},
+        'late_recovery': 'Recuperado más tarde, {when}',
+        'inc_detail': 'Incidente del {start}', 'inc_start': 'Inicio', 'inc_end': 'Fin', 'inc_interruptions': 'Interrupciones del monitor',
+        'inc_affected': 'Dispositivos afectados', 'col_kind': 'Estado', 'col_down_at': 'Cayó', 'col_back_at': 'Volvió',
+        'inc_coordinator': 'Coordinador', 'inc_before': 'Antes del incidente',
+        'inc_last_message': 'Último mensaje recibido: {device} a las {time}',
+        'inc_busiest': 'Dispositivos más activos (10 min)', 'inc_per_minute': 'Mensajes por minuto (10 min)',
+        'inc_info_logs': 'Líneas de registro de Zigbee2MQTT por minuto', 'inc_health_title': 'Último informe de salud de Zigbee2MQTT',
+        'inc_context': 'Eventos de los 10 minutos anteriores', 'inc_timeline': 'Línea de tiempo',
+        'inc_dropped': '{n} líneas descartadas por el límite de tamaño', 'inc_entities': 'Entidades del coordinador',
+        'inc_at_start': 'al inicio', 'inc_at_end': 'al final', 'none': 'ninguno', 'col_value': 'Valor',
+        'settings_incidents': 'Incidentes',
+        'settings_entities_help': 'Entidades de Home Assistant de tu coordinador (temperatura, tiempo encendido…) que se guardan al inicio y al final de cada incidente. Máximo 10, separadas por comas.',
+        'settings_entities_placeholder': 'sensor.mi_coordinador_temperatura, sensor.mi_coordinador_uptime',
+        'save': 'Guardar', 'settings_entities_unknown': 'Estas entidades no existen en Home Assistant: {entities}',
+        'settings_entities_invalid': 'Formato no válido: usa ids como sensor.nombre, separados por comas (máximo 10).',
+        'saved': 'Guardado',
+        'k_type': 'Tipo', 'k_firmware': 'Firmware', 'k_adapter': 'Adaptador', 'k_port': 'Puerto',
+        'k_uptime': 'En marcha', 'k_memory': 'Memoria (MB)', 'k_load': 'Carga del sistema', 'k_queued': 'Cola MQTT', 'k_published': 'Mensajes MQTT publicados',
         'settings_notify': 'Notificaciones',
         'settings_notify_help': 'Elige qué avisos llegan a tus destinos de notificación. El historial, el panel y las entidades siguen registrándolo todo.',
         'set_devices': 'Dispositivos', 'set_devices_help': 'Nuevo offline, desaparecido y recuperado.',
@@ -772,6 +866,44 @@ PANEL_TEXTS = {
         'confirm_clear': 'Are you sure you want to clear the whole event history? This cannot be undone.',
         'clear_failed': 'Could not clear the history: {error}',
         'tab_status': 'Status', 'tab_devices': 'Devices', 'tab_settings': 'Settings',
+        'tab_traffic': 'Traffic', 'tab_incidents': 'Incidents',
+        'periods': {'hour': 'Last hour', 'day': 'Day', 'week': 'Week', 'month': 'Month'},
+        'traffic_help': 'Messages Zigbee2MQTT publishes for each device (only counted, never stored). Busiest first.',
+        'traffic_total': '{total} messages · {per_min} per minute · {n} devices',
+        'traffic_since': 'Data since {since}',
+        'traffic_coverage': 'The monitor ran for {pct}% of this period: totals may be lower than the real ones.',
+        'traffic_empty': 'No messages counted in this period yet.',
+        'col_device': 'Device', 'col_messages': 'Messages', 'col_per_min': 'Per min', 'col_pct': '%',
+        'tag_watched': 'WATCHED', 'tag_unwatched': 'NOT WATCHED',
+        'inc_help': 'Automatic report of every general failure or Zigbee2MQTT outage: what happened before, during and after. The last 30 are kept.',
+        'inc_count': '{n} incidents', 'inc_interval': 'one every {d} on average', 'inc_mean_duration': 'mean duration {d}',
+        'inc_hours': 'Most frequent hours: {hours}', 'inc_repeated': 'Errors that repeat before incidents',
+        'inc_empty': 'No incident recorded.',
+        'download_all': 'Download all', 'delete_all': 'Delete all', 'download': 'Download', 'delete': 'Delete',
+        'confirm_delete': 'Delete this incident report?', 'confirm_delete_all': 'Delete every closed incident report?',
+        'delete_failed': 'Could not delete: {error}',
+        'col_date': 'Date', 'col_trigger': 'Type', 'col_duration': 'Duration', 'col_outcome': 'Result', 'col_affected': 'Affected',
+        'triggers': {'general': 'General failure', 'z2m': 'Zigbee2MQTT down'},
+        'outcomes': {'self': 'RECOVERED', 'restart': 'AFTER RESTART', 'not_recovered': 'NOT RECOVERED',
+                     'interruption': 'DURING INTERRUPTION', 'open': 'IN PROGRESS'},
+        'late_recovery': 'Recovered later, {when}',
+        'inc_detail': 'Incident of {start}', 'inc_start': 'Start', 'inc_end': 'End', 'inc_interruptions': 'Monitor interruptions',
+        'inc_affected': 'Affected devices', 'col_kind': 'Status', 'col_down_at': 'Down', 'col_back_at': 'Back',
+        'inc_coordinator': 'Coordinator', 'inc_before': 'Before the incident',
+        'inc_last_message': 'Last message received: {device} at {time}',
+        'inc_busiest': 'Busiest devices (10 min)', 'inc_per_minute': 'Messages per minute (10 min)',
+        'inc_info_logs': 'Zigbee2MQTT log lines per minute', 'inc_health_title': 'Last Zigbee2MQTT health report',
+        'inc_context': 'Events of the previous 10 minutes', 'inc_timeline': 'Timeline',
+        'inc_dropped': '{n} lines dropped by the size limit', 'inc_entities': 'Coordinator entities',
+        'inc_at_start': 'at start', 'inc_at_end': 'at end', 'none': 'none', 'col_value': 'Value',
+        'settings_incidents': 'Incidents',
+        'settings_entities_help': 'Home Assistant entities of your coordinator (temperature, uptime…) saved at the start and end of each incident. At most 10, comma separated.',
+        'settings_entities_placeholder': 'sensor.my_coordinator_temperature, sensor.my_coordinator_uptime',
+        'save': 'Save', 'settings_entities_unknown': 'These entities do not exist in Home Assistant: {entities}',
+        'settings_entities_invalid': 'Invalid format: use ids like sensor.name, comma separated (at most 10).',
+        'saved': 'Saved',
+        'k_type': 'Type', 'k_firmware': 'Firmware', 'k_adapter': 'Adapter', 'k_port': 'Port',
+        'k_uptime': 'Uptime', 'k_memory': 'Memory (MB)', 'k_load': 'System load', 'k_queued': 'MQTT queue', 'k_published': 'MQTT messages published',
         'settings_notify': 'Notifications',
         'settings_notify_help': 'Choose which alerts reach your notification targets. The history, the panel and the entities keep recording everything.',
         'set_devices': 'Devices', 'set_devices_help': 'New offline, missing and recovered.',
@@ -983,9 +1115,10 @@ class EventTracker:
     when the window closes a single line records the settled state.
     """
 
-    def __init__(self, write=journal_write, settle_mqtt=None, settle_z2m=None, alerts=None):
+    def __init__(self, write=journal_write, settle_mqtt=None, settle_z2m=None, alerts=None, incidents=None):
         self.write = write
         self.alerts = alerts or NoAlerts()
+        self.incidents = incidents or NoIncidents()
         self.settle_mqtt = SETTLE_MQTT if settle_mqtt is None else settle_mqtt
         self.settle_z2m = SETTLE_Z2M if settle_z2m is None else settle_z2m
         self.mqtt = None          # None (never tried), 'up', 'down'
@@ -1014,16 +1147,19 @@ class EventTracker:
     def mqtt_up(self, now):
         if self.mqtt != 'up':
             self.write(MQTT, t('mqtt_recovered') if self.ever_up else t('mqtt_connected'))
+            self.incidents.mqtt(True)
         self.mqtt, self.ever_up = 'up', True
         self._settle(now, self.settle_mqtt, z2m=False)
 
     def mqtt_down(self):
         if self.mqtt != 'down':
             self.write(MQTT, t('mqtt_lost') if self.mqtt == 'up' else t('mqtt_failed'))
+            self.incidents.mqtt(False)
         self.mqtt = 'down'
 
     def observe(self, payload, bridge, now, ready=True):
         if bridge is not None and bridge != self.bridge:
+            self.incidents.z2m(bridge)
             if bridge == 'offline':
                 self.write(Z2M, t('z2m_offline'))
             elif bridge == 'online' and self.bridge == 'offline':
@@ -1047,9 +1183,11 @@ class EventTracker:
                 self.write(Z2M, t('z2m_settled'))
                 self._check_availability(payload.get('z2m_availability'))
                 self._log(payload, now, full=True)
+                self.incidents.observe(payload)
                 return
         self._check_availability(payload.get('z2m_availability'))
         self._log(payload, now)
+        self.incidents.observe(payload)
 
     def _log_reconnections(self, payload):
         """During a Zigbee2MQTT settle, write each device that was down before and is online again,
@@ -1115,6 +1253,7 @@ class EventTracker:
     def tick(self, now):
         """Timers that must run even while disconnected (delayed and grouped notifications)."""
         self.alerts.system(self.mqtt, self.bridge, now)
+        self.incidents.tick()
         # Grouped device notifications wait while the data cannot be trusted: MQTT down,
         # Zigbee2MQTT offline or a settle window. They resolve against the settled state.
         hold = self.mqtt != 'up' or self.bridge != 'online' or self.settle_until is not None
@@ -1190,6 +1329,8 @@ class Notifier:
 # Kinds of notification the user can turn off (panel "Settings" tab and Home Assistant switches):
 # kind -> switch key. Only sending is affected: history, log, panel and entities never change.
 NOTIFY_KINDS = {'devices': 'notify_devices', 'general': 'notify_general_failure', 'system': 'notify_system'}
+ENTITY_RE = re.compile(r'[a-z_]+\.[a-z0-9_]+')
+ENTITIES_MAX = 10
 
 
 class Settings:
@@ -1209,6 +1350,9 @@ class Settings:
         notify = data.get('notify') if isinstance(data, dict) else None
         notify = notify if isinstance(notify, dict) else {}
         self.notify = {kind: notify.get(kind) is not False for kind in NOTIFY_KINDS}
+        entities = data.get('coordinator_entities') if isinstance(data, dict) else None
+        self.entities = [e for e in entities if isinstance(e, str) and ENTITY_RE.fullmatch(e)][:ENTITIES_MAX] \
+            if isinstance(entities, list) else []
 
     def notifies(self, kind):
         with self.lock:
@@ -1221,7 +1365,7 @@ class Settings:
     def _save(self):
         temporary = self.path.with_suffix('.tmp')
         try:
-            temporary.write_text(json.dumps({'notify': self.notify}, sort_keys=True))
+            temporary.write_text(json.dumps({'notify': self.notify, 'coordinator_entities': self.entities}, sort_keys=True))
             os.replace(temporary, self.path)
         except OSError:
             LOG.warning(t('log_settings_save_failed'))
@@ -1238,6 +1382,26 @@ class Settings:
             self.version += 1
         text = t('settings_changed', what=t('notify_' + kind), state=t('state_on' if value else 'state_off'),
                  source=t('source_' + source))
+        LOG.info(text)
+        journal_write(SYSTEM, text)
+        return True
+
+    def coordinator_entities(self):
+        with self.lock:
+            return list(self.entities)
+
+    def set_entities(self, entities):
+        """From the panel: Home Assistant entities of the coordinator snapshotted in incident reports."""
+        if (not isinstance(entities, list) or len(entities) > ENTITIES_MAX
+                or not all(isinstance(e, str) and ENTITY_RE.fullmatch(e) for e in entities)):
+            raise ValueError('invalid entities')
+        entities = list(dict.fromkeys(entities))
+        with self.lock:
+            if entities == self.entities:
+                return False
+            self.entities = entities
+            self._save()
+        text = t('entities_changed', entities=', '.join(entities) or t('entities_none'))
         LOG.info(text)
         journal_write(SYSTEM, text)
         return True
@@ -1572,6 +1736,631 @@ class NoAlerts:
         pass
 
 
+# ---------- Traffic, incidents, unexpected stops ----------
+
+TRAFFIC = DATA / 'traffic.json'
+INCIDENTS = DATA / 'incidents'
+HEARTBEAT = DATA / 'heartbeat.json'
+TRAFFIC_HOURS = 31 * 24     # hourly counts kept
+TRAFFIC_SAVE = 300          # seconds between saves of the counts
+TRAFFIC_PERIODS = {'hour': 1, 'day': 24, 'week': 7 * 24, 'month': 30 * 24}  # length in hours
+INCIDENT_MAX = float(os.environ.get('ZM_INCIDENT_MAX', 6 * 3600))  # then closed as not recovered
+INCIDENT_SETTLE = float(os.environ.get('ZM_INCIDENT_SETTLE', RECOVERY_SETTLE))  # quiet after recovery
+INCIDENTS_KEEP = 30
+CONTEXT_SECONDS = 600       # what happened before an incident: the last 10 minutes...
+CONTEXT_LINES = 300         # ...at most this many lines (the newest are kept)
+TIMELINE_LINES = 1000       # lines recorded during one incident
+INCIDENT_SAVE = 60          # an open incident is saved at least this often (power cuts)
+INCIDENT_FLUSH = 5          # ...and within seconds of any change
+HEARTBEAT_EVERY = 60
+INCIDENT_ID_RE = re.compile(r'\d{8}-\d{6}(-\d+)?')
+
+
+def local_iso(epoch):
+    return time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(epoch))
+
+
+def write_json(path, data):
+    """Atomic write: a power cut never leaves a half-written file."""
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True))
+    os.replace(temporary, path)
+
+
+def duration_text(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return t('dur_s', s=seconds)
+    minutes = seconds // 60
+    if minutes < 60:
+        return t('dur_m', m=minutes)
+    return t('dur_hm', h=minutes // 60, m=minutes % 60)
+
+
+class Heartbeat:
+    """Detects unexpected stops (power cut, crash, forced restart): a small file updated every
+    minute that also says whether the last stop was orderly."""
+
+    def __init__(self, path=HEARTBEAT, clock=time.time):
+        self.path = Path(path)
+        self.clock = clock
+        self.last = 0
+        try:
+            data = json.loads(self.path.read_text())
+        except (FileNotFoundError, ValueError, OSError):
+            data = None
+        ok = isinstance(data, dict) and isinstance(data.get('time'), (int, float))
+        self.previous_time = data['time'] if ok else None
+        self.previous_clean = bool(data.get('clean')) if ok else True
+
+    def unexpected_stop(self):
+        """Last sign of life of the previous run if it did not stop orderly, else None."""
+        return None if self.previous_clean else self.previous_time
+
+    def beat(self, clean=False):
+        self.last = self.clock()
+        try:
+            write_json(self.path, {'time': self.last, 'clean': clean})
+        except OSError:
+            LOG.warning(t('log_heartbeat_failed'))
+
+    def tick(self):
+        if self.clock() - self.last >= HEARTBEAT_EVERY:
+            self.beat()
+
+
+class Traffic:
+    """Messages each Zigbee2MQTT device publishes, by IEEE address: per minute for the last hour
+    (memory only) and per hour for 31 days (/data/traffic.json, saved every few minutes). Only
+    counts are kept, never the messages."""
+
+    def __init__(self, path=TRAFFIC, clock=time.time):
+        self.path = Path(path)
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.minutes = {}     # ieee -> {minute: count}
+        self.hours = {}       # ieee -> {hour: count}
+        self.running = set()  # hours in which the monitor was counting
+        self.saved = self.clock()
+        try:
+            data = json.loads(self.path.read_text())
+        except (FileNotFoundError, ValueError, OSError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        for ieee, buckets in (data.get('hours') or {}).items():
+            if IEEE_RE.fullmatch(str(ieee)) and isinstance(buckets, dict):
+                self.hours[ieee] = {int(h): n for h, n in buckets.items()
+                                    if str(h).isdigit() and isinstance(n, int) and n > 0}
+        self.running = {h for h in data.get('running') or [] if isinstance(h, int)}
+
+    def count(self, ieee):
+        now = self.clock()
+        minute, hour = int(now // 60), int(now // 3600)
+        with self.lock:
+            bucket = self.minutes.setdefault(ieee, {})
+            bucket[minute] = bucket.get(minute, 0) + 1
+            bucket = self.hours.setdefault(ieee, {})
+            bucket[hour] = bucket.get(hour, 0) + 1
+            self.running.add(hour)
+
+    def tick(self):
+        now = self.clock()
+        with self.lock:
+            self.running.add(int(now // 3600))
+        if now - self.saved >= TRAFFIC_SAVE:
+            self.save()
+
+    def _prune(self, now):
+        first_minute, first_hour = int(now // 60) - 60, int(now // 3600) - TRAFFIC_HOURS
+        for store, first in ((self.minutes, first_minute), (self.hours, first_hour)):
+            for ieee in list(store):
+                store[ieee] = {k: n for k, n in store[ieee].items() if k > first}
+                if not store[ieee]:
+                    del store[ieee]
+        self.running = {h for h in self.running if h > first_hour}
+
+    def save(self):
+        now = self.clock()
+        with self.lock:
+            self._prune(now)
+            data = {'hours': {ieee: {str(h): n for h, n in b.items()} for ieee, b in self.hours.items()},
+                    'running': sorted(self.running)}
+        try:
+            write_json(self.path, data)
+        except OSError:
+            LOG.warning(t('log_traffic_save_failed'))
+        self.saved = now
+
+    def totals(self, period):
+        """({ieee: messages}, covered share of the period 0..1, epoch of the first data or None)."""
+        now = self.clock()
+        hours = TRAFFIC_PERIODS[period]
+        this_hour = int(now // 3600)
+        with self.lock:
+            if period == 'hour':
+                first = int(now // 60) - 59
+                counts = {i: sum(n for m, n in b.items() if m >= first) for i, b in self.minutes.items()}
+            else:
+                first = this_hour - hours + 1
+                counts = {i: sum(n for h, n in b.items() if h >= first) for i, b in self.hours.items()}
+            covered = sum(1 for h in self.running if h > this_hour - hours)
+            since = min(self.running) * 3600 if self.running else None
+        return {i: n for i, n in counts.items() if n}, min(1.0, covered / hours), since
+
+    def recent(self, minutes=10):
+        """Network messages per minute and busiest devices of the last minutes (for incidents)."""
+        now = self.clock()
+        first = int(now // 60) - minutes + 1
+        per_minute, per_device = {}, {}
+        with self.lock:
+            for ieee, bucket in self.minutes.items():
+                for minute, n in bucket.items():
+                    if minute >= first:
+                        per_minute[minute] = per_minute.get(minute, 0) + n
+                        per_device[ieee] = per_device.get(ieee, 0) + n
+        busiest = sorted(per_device.items(), key=lambda item: -item[1])
+        return [per_minute.get(m, 0) for m in range(first, first + minutes)], busiest
+
+
+class NoIncidents:
+    current = None
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+class Incidents:
+    """Incident reports: when the network fails, what happened before, during and after.
+
+    Always keeps the relevant facts of the last minutes (availability changes, Zigbee2MQTT state,
+    its warnings and errors, health reports, MQTT connection); chatty devices are only counted
+    (Traffic). A general failure (same rule as the notifications, but independent of them) or
+    Zigbee2MQTT offline for ALERT_DELAY seconds opens a report with that context; it records a
+    timeline until the network is back and quiet for INCIDENT_SETTLE seconds, or INCIDENT_MAX
+    seconds have passed. An open report is saved often, so a power cut or a restart continues it.
+    """
+
+    def __init__(self, traffic=None, directory=INCIDENTS, write=journal_write, clock=time.time,
+                 entities=None, read_state=None, name_of=None, ieee_of=None):
+        self.dir = Path(directory)
+        self.traffic = traffic
+        self.write = write
+        self.clock = clock
+        self.entities = entities or (lambda: [])          # coordinator entities to snapshot
+        self.read_state = read_state or (lambda entity: core_api('GET', 'states/' + entity))
+        self.name_of = name_of or (lambda ieee: ieee)
+        self.ieee_of = ieee_of or (lambda name: None)
+        self.threaded = True                                # entity snapshots in the background
+        self.lock = threading.RLock()
+        self.context = collections.deque()                 # recent lines, CONTEXT_SECONDS / CONTEXT_LINES
+        self.dropped = collections.deque()                 # times of recent lines dropped by CONTEXT_LINES
+        self.info_logs = collections.deque()               # times of Zigbee2MQTT info lines (counted only)
+        self.last_message = None                           # (time, device) of the last device message
+        self.coordinator = None
+        self.health = None
+        self.health_devices = {}
+        self.uptime = None
+        self.availability = {}
+        self.bridge = None
+        self.bridge_since = None
+        self.down = None                                   # watched devices down at the last observation
+        self.losses = collections.deque()                  # (time, name) of recent losses
+        self.current = None
+        self.recovered_at = None
+        self.saved = 0
+        self.dirty = False
+        self.late = None                                   # (id, names) of a 'not recovered' report
+        self.resumed = False
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            LOG.warning(t('log_incidents_dir_failed'))
+        for item in self._all():
+            if item.get('status') == 'open':
+                self.current, self.resumed = item, True    # continues after a restart or a power cut
+
+    # ----- storage -----
+
+    def _path(self, incident_id):
+        return self.dir / (incident_id + '.json')
+
+    def _all(self):
+        items = []
+        try:
+            files = sorted(self.dir.glob('*.json'))
+        except OSError:
+            return items
+        for path in files:
+            if not INCIDENT_ID_RE.fullmatch(path.stem):
+                continue
+            try:
+                data = json.loads(path.read_text())
+            except (ValueError, OSError):
+                continue
+            if isinstance(data, dict) and data.get('id') == path.stem:
+                items.append(data)
+        return items
+
+    def _save(self, incident=None):
+        incident = incident or self.current
+        if incident is None:
+            return
+        try:
+            write_json(self._path(incident['id']), incident)
+        except OSError:
+            LOG.warning(t('log_incident_save_failed'))
+        self.saved, self.dirty = self.clock(), False
+
+    def save(self):
+        with self.lock:
+            self._save()
+
+    def _retention(self):
+        closed = [item['id'] for item in self._all() if item.get('status') == 'closed']
+        for incident_id in closed[:-INCIDENTS_KEEP]:
+            try:
+                self._path(incident_id).unlink()
+            except OSError:
+                pass
+
+    # ----- what happens (called by the main loop, the tracker and the MQTT handler) -----
+
+    def _line(self, kind, text, save=True):
+        now = self.clock()
+        entry = {'t': local_iso(now), 'kind': kind, 'text': text}
+        self.context.append((now, entry))
+        while self.context and (now - self.context[0][0] > CONTEXT_SECONDS or len(self.context) > CONTEXT_LINES):
+            if now - self.context[0][0] <= CONTEXT_SECONDS:
+                self.dropped.append(now)
+            self.context.popleft()
+        while self.dropped and now - self.dropped[0] > CONTEXT_SECONDS:
+            self.dropped.popleft()
+        if self.current is not None:
+            timeline = self.current['timeline']
+            if len(timeline) < TIMELINE_LINES:
+                timeline.append(entry)
+            else:
+                self.current['timeline_dropped'] += 1
+            self.dirty = True
+
+    def mqtt(self, up):
+        with self.lock:
+            self._line('mqtt', t('inc_mqtt_up' if up else 'inc_mqtt_down'))
+
+    def z2m(self, bridge):
+        with self.lock:
+            if bridge == self.bridge:
+                return
+            if self.bridge is not None or bridge == 'offline':
+                self._line('z2m', t('inc_z2m_' + ('online' if bridge == 'online' else 'offline')))
+            if self.current is not None and bridge == 'offline':
+                self.current['z2m_restarted'] = True
+            self.bridge, self.bridge_since = bridge, self.clock()
+
+    def z2m_log(self, payload):
+        """bridge/logging: warnings and errors are kept, info lines only counted."""
+        try:
+            data = json.loads(payload)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(data, dict):
+            return
+        level, message = str(data.get('level', '')).lower(), ' '.join(str(data.get('message', '')).split())
+        with self.lock:
+            if level in ('warning', 'warn', 'error'):
+                self._line('log', '%s: %s' % ('error' if level == 'error' else 'warning', message[:300]))
+            elif level == 'info':
+                now = self.clock()
+                self.info_logs.append(now)
+                while self.info_logs and now - self.info_logs[0] > CONTEXT_SECONDS:
+                    self.info_logs.popleft()
+
+    def z2m_health(self, payload):
+        try:
+            data = json.loads(payload)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(data, dict):
+            return
+        process, osys, mqtt = (data.get(k) if isinstance(data.get(k), dict) else {} for k in ('process', 'os', 'mqtt'))
+        load = osys.get('load_average')
+        health = {'uptime_s': process.get('uptime_sec'), 'memory_mb': process.get('memory_used_mb'),
+                  'os_load': load[0] if isinstance(load, list) and load else None,
+                  'os_memory_pct': osys.get('memory_percent'),
+                  'mqtt_queued': mqtt.get('queued'), 'mqtt_published': mqtt.get('published')}
+        with self.lock:
+            uptime = health['uptime_s']
+            restarted = isinstance(uptime, (int, float)) and isinstance(self.uptime, (int, float)) and uptime < self.uptime
+            self.uptime, self.health = uptime, health
+            if isinstance(data.get('devices'), dict):
+                self.health_devices = data['devices']
+            if restarted:
+                self._line('z2m', t('inc_z2m_restarted'))
+                if self.current is not None:
+                    self.current['z2m_restarted'] = True
+            self._line('health', t('inc_health', uptime=duration_text(uptime or 0), memory=health['memory_mb'],
+                                   load=health['os_load'], queued=health['mqtt_queued']))
+
+    def bridge_info(self, payload):
+        try:
+            data = json.loads(payload)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(data, dict):
+            return
+        coordinator = data.get('coordinator') if isinstance(data.get('coordinator'), dict) else {}
+        meta = coordinator.get('meta') if isinstance(coordinator.get('meta'), dict) else {}
+        config = data.get('config') if isinstance(data.get('config'), dict) else {}
+        serial = config.get('serial') if isinstance(config.get('serial'), dict) else {}
+        with self.lock:
+            self.coordinator = {'zigbee2mqtt': data.get('version'), 'type': coordinator.get('type'),
+                                'revision': meta.get('revision'), 'ieee': coordinator.get('ieee_address'),
+                                'adapter': serial.get('adapter'), 'port': serial.get('port')}
+
+    def message(self, name):
+        self.last_message = (self.clock(), name)
+
+    def device_availability(self, name, value):
+        with self.lock:
+            old = self.availability.get(name)
+            self.availability[name] = value
+            if old is not None and value is not None and value != old:
+                self._line('availability', '%s: %s' % (name, value))
+
+    def action(self, text, restart=False):
+        with self.lock:
+            self._line('action', text)
+            if restart and self.current is not None:
+                self.current['restart_requested'] = True
+
+    def interruption(self, since):
+        """The monitor was not running from `since` until now (restart, power cut)."""
+        with self.lock:
+            if self.current is None:
+                return
+            start = since if since is not None else self.clock()
+            self._line('gap', t('inc_gap', start=local_iso(start)[11:16], end=local_iso(self.clock())[11:16]))
+            self.current['interruptions'] = self.current.get('interruptions', 0) + 1
+
+    # ----- decisions -----
+
+    def _mass_loss(self, now):
+        while self.losses and now - self.losses[0][0] > max(GENERAL_WINDOW, NOTIFY_GROUP * GENERAL_FAILURE):
+            self.losses.popleft()
+        times = [when for when, _ in self.losses]
+        if sum(1 for when in times if now - when <= GENERAL_WINDOW) >= GENERAL_FAILURE:
+            return True
+        chain = 1
+        for earlier, later in zip(times[-2::-1], times[::-1]):
+            if later - earlier > NOTIFY_GROUP:
+                break
+            chain += 1
+        return chain >= GENERAL_FAILURE
+
+    def observe(self, payload):
+        """Watched devices, once the data can be trusted (MQTT up, Zigbee2MQTT online, settled)."""
+        if not payload.get('data_valid'):
+            return
+        with self.lock:
+            now = self.clock()
+            kinds = {name: 'offline' for name in payload.get('offline_names') or []}
+            kinds.update({name: 'missing' for name in payload.get('missing_names') or []})
+            down = set(kinds)
+            if self.down is None:
+                self.down = down
+                if self.resumed and self.current is not None and not (down & self._lost()):
+                    self._close('interruption')      # everything came back while the monitor was stopped
+                self.resumed = False
+                self._late_recovery(down)
+                return
+            before, self.down = self.down, down
+            for name in sorted(down - before):
+                self.losses.append((now, name))
+                if kinds[name] == 'missing':
+                    self._line('availability', t('inc_missing', name=name), save=False)
+                if self.current is not None:
+                    self._affect(name, kinds[name], now)
+            for name in sorted(before - down):
+                if self.current is not None:
+                    for item in self.current['affected']:
+                        if item['name'] == name and item['back'] is None:
+                            item['back'] = local_iso(now)
+            if down - before and self.current is None and self._mass_loss(now):
+                recent = list(dict.fromkeys(name for when, name in self.losses if name in down))
+                self._open('general', baseline=before - set(recent), lost=recent, kinds=kinds)
+            if self.current is not None:
+                if down & self._lost():
+                    self.recovered_at = None
+                elif self.recovered_at is None:
+                    self.recovered_at = now
+            self._late_recovery(down)
+
+    def _lost(self):
+        return {item['name'] for item in self.current['affected']} if self.current else set()
+
+    def _affect(self, name, kind, now):
+        for item in self.current['affected']:
+            if item['name'] == name:
+                item['back'] = None
+                return
+        self.current['affected'].append({'name': name, 'kind': kind, 'at': local_iso(now), 'back': None})
+
+    def tick(self):
+        with self.lock:
+            now = self.clock()
+            if self.current is None:
+                if self.bridge == 'offline' and self.bridge_since is not None and now - self.bridge_since >= ALERT_DELAY:
+                    self._open('z2m', baseline=self.down or set(), lost=[], kinds={})
+                return
+            if now - self.current['start'] >= INCIDENT_MAX:
+                self._close('not_recovered')
+                return
+            if (self.recovered_at is not None and self.bridge == 'online'
+                    and now - self.recovered_at >= INCIDENT_SETTLE and not self.resumed):
+                self._close('restart' if self.current.get('z2m_restarted') or self.current.get('restart_requested') else 'self')
+                return
+            if now - self.saved >= INCIDENT_SAVE or (self.dirty and now - self.saved >= INCIDENT_FLUSH):
+                self._save()
+
+    def _open(self, trigger, baseline, lost, kinds):
+        now = self.clock()
+        incident_id = time.strftime('%Y%m%d-%H%M%S', time.localtime(now))
+        if self._path(incident_id).exists():
+            incident_id += '-%d' % int(now * 1000 % 1000)
+        per_minute, busiest = self.traffic.recent(10) if self.traffic else ([], [])
+        info = [0] * 10
+        for when in self.info_logs:
+            age = int((now - when) // 60)
+            if 0 <= age < 10:
+                info[9 - age] += 1
+        leaves = {}
+        for name in lost:
+            ieee = self.ieee_of(name)
+            stats = self.health_devices.get(ieee) if ieee else None
+            if isinstance(stats, dict):
+                leaves[name] = {'leave_count': stats.get('leave_count'), 'messages_per_sec': stats.get('messages_per_sec')}
+        self.current = {
+            'id': incident_id, 'version': VERSION, 'status': 'open', 'trigger': trigger,
+            'start': now, 'start_text': local_iso(now), 'end': None, 'end_text': None, 'duration_s': None,
+            'outcome': None, 'late_recovery': None, 'z2m_restarted': trigger == 'z2m', 'restart_requested': False,
+            'affected': [{'name': name, 'kind': kinds.get(name, 'offline'),
+                          'at': local_iso(next((w for w, n in self.losses if n == name), now)), 'back': None}
+                         for name in lost],
+            'down_before': sorted(baseline),
+            'context': [entry for _, entry in self.context], 'context_dropped': len(self.dropped),
+            'timeline': [], 'timeline_dropped': 0,
+            'coordinator': self.coordinator, 'health': self.health, 'devices_health': leaves,
+            'traffic': {'messages_per_minute': per_minute, 'z2m_info_logs_per_minute': info,
+                        'busiest': [{'name': self.name_of(ieee), 'messages': n} for ieee, n in busiest[:5]]},
+            'last_message': {'t': local_iso(self.last_message[0]), 'device': self.last_message[1]}
+                            if self.last_message else None,
+            'z2m_state': self.bridge, 'entities': {},
+        }
+        self.recovered_at = None
+        self._line('open', t('inc_opened_' + trigger))
+        LOG.info(t('inc_opened_' + trigger))
+        self._save()
+        self._snapshot_entities(self.current, 'start')
+
+    def _close(self, outcome):
+        incident, now = self.current, self.clock()
+        incident.update(status='closed', end=now, end_text=local_iso(now), duration_s=int(now - incident['start']),
+                        outcome=outcome)
+        self._line('close', t('inc_outcome_' + outcome), save=False)
+        self._save(incident)
+        self.current, self.recovered_at = None, None
+        self.late = (incident['id'], {item['name'] for item in incident['affected']}) if outcome == 'not_recovered' else None
+        self._snapshot_entities(incident, 'end')
+        self._retention()
+        text = t('incident_recorded', trigger=t('inc_trigger_' + incident['trigger']),
+                 duration=duration_text(incident['duration_s']), outcome=t('inc_outcome_' + outcome))
+        LOG.info(text)
+        self.write(SYSTEM, text)
+
+    def _late_recovery(self, down):
+        """A report closed as not recovered notes when the network came back afterwards."""
+        if self.late is None or self.bridge != 'online' or self.late[1] & down:
+            return
+        incident_id, self.late = self.late[0], None
+        try:
+            incident = json.loads(self._path(incident_id).read_text())
+        except (ValueError, OSError):
+            return
+        incident['late_recovery'] = local_iso(self.clock())
+        self._save(incident)
+
+    def _snapshot_entities(self, incident, label):
+        entities = list(self.entities())
+        if not entities:
+            return
+
+        def run():
+            values = {}
+            for entity in entities:
+                try:
+                    data = self.read_state(entity)
+                    attributes = data.get('attributes') if isinstance(data.get('attributes'), dict) else {}
+                    values[entity] = {'state': data.get('state'), 'unit': attributes.get('unit_of_measurement'),
+                                      'name': attributes.get('friendly_name'), 'last_changed': data.get('last_changed')}
+                except Exception as exc:  # the report is still useful without them
+                    values[entity] = {'error': failure_reason(exc)}
+            with self.lock:
+                incident['entities'][label] = values
+                self._save(incident)
+
+        if self.threaded:
+            threading.Thread(target=run, name='incident-entities', daemon=True).start()
+        else:
+            run()
+
+    # ----- panel -----
+
+    def list(self):
+        with self.lock:
+            items = self._all()
+        rows = [{'id': i['id'], 'status': i.get('status'), 'trigger': i.get('trigger'), 'start': i.get('start_text'),
+                 'duration_s': i.get('duration_s'), 'outcome': i.get('outcome'),
+                 'affected': [a.get('name') for a in i.get('affected', [])], 'late_recovery': i.get('late_recovery')}
+                for i in items]
+        return {'incidents': rows[::-1], 'summary': self.summary(items)}
+
+    def get(self, incident_id):
+        if not INCIDENT_ID_RE.fullmatch(incident_id or ''):
+            return None
+        with self.lock:
+            try:
+                return json.loads(self._path(incident_id).read_text())
+            except (ValueError, OSError):
+                return None
+
+    def all(self):
+        with self.lock:
+            return self._all()
+
+    def delete(self, incident_id=None):
+        """Delete one closed report, or every closed report (incident_id None). Returns how many."""
+        with self.lock:
+            ids = [i['id'] for i in self._all() if i.get('status') == 'closed'
+                   and (incident_id is None or i['id'] == incident_id)]
+            for item in ids:
+                try:
+                    self._path(item).unlink()
+                except OSError:
+                    pass
+            if self.late and self.late[0] in ids:
+                self.late = None
+        if ids:
+            self.write(SYSTEM, tn('incidents_deleted', len(ids), n=len(ids)))
+        return len(ids)
+
+    @staticmethod
+    def summary(items):
+        starts = sorted(i['start'] for i in items if isinstance(i.get('start'), (int, float)))
+        closed = [i for i in items if i.get('status') == 'closed' and isinstance(i.get('duration_s'), int)]
+        hours, outcomes, errors = {}, {}, {}
+        for i in items:
+            if isinstance(i.get('start'), (int, float)):
+                hour = time.localtime(i['start']).tm_hour
+                hours[hour] = hours.get(hour, 0) + 1
+            if i.get('outcome'):
+                outcomes[i['outcome']] = outcomes.get(i['outcome'], 0) + 1
+            seen = set()
+            for entry in (i.get('context') or []) + (i.get('timeline') or []):
+                if entry.get('kind') == 'log':
+                    seen.add(re.sub(r'\d{2,}', '#', entry.get('text', ''))[:160])  # 6000ms -> #ms, keeps 'attempt 1/2'
+            for text in seen:
+                errors[text] = errors.get(text, 0) + 1
+        gaps = [b - a for a, b in zip(starts, starts[1:])]
+        return {'count': len(items),
+                'mean_interval_s': int(sum(gaps) / len(gaps)) if gaps else None,
+                'mean_duration_s': int(sum(i['duration_s'] for i in closed) / len(closed)) if closed else None,
+                'hours': sorted(hours.items(), key=lambda item: (-item[1], item[0]))[:3],
+                'outcomes': outcomes,
+                'repeated_errors': sorted(((text, n) for text, n in errors.items() if n >= 2),
+                                          key=lambda item: -item[1])[:5]}
+
+
 # ---------- Notification buttons ----------
 
 class WebSocket:
@@ -1836,10 +2625,36 @@ def parse_ieee_list(value):
 def settings_view(settings):
     """Panel data for the Settings tab."""
     return {'notify': settings.snapshot(), 'targets': settings.targets, 'discovery': settings.discovery,
-            'entities': {kind: 'switch.zigbee_monitor_' + key for kind, key in NOTIFY_KINDS.items()}}
+            'entities': {kind: 'switch.zigbee_monitor_' + key for kind, key in NOTIFY_KINDS.items()},
+            'coordinator_entities': settings.coordinator_entities()}
 
 
-def make_handler(journal, panel, monitor=None, settings=None):
+def traffic_view(traffic, monitor, period):
+    """Panel data for the Traffic tab: every device, busiest first."""
+    counts, coverage, since = traffic.totals(period)
+    minutes = TRAFFIC_PERIODS[period] * 60
+    total = sum(counts.values())
+    watched = set(monitor.store.watched) if monitor is not None else set()
+    rows = [{'ieee': ieee, 'name': monitor.name_of(ieee) if monitor is not None else ieee, 'watched': ieee in watched,
+             'messages': n, 'per_min': round(n / minutes, 2), 'pct': round(100.0 * n / total, 1) if total else 0}
+            for ieee, n in counts.items()]
+    rows.sort(key=lambda row: (-row['messages'], row['name'].lower()))
+    return {'period': period, 'rows': rows, 'total': total, 'per_min': round(total / minutes, 2),
+            'coverage': round(coverage, 3), 'since': local_iso(since) if since else None}
+
+
+def entity_exists(entity):
+    try:
+        core_api('GET', 'states/' + entity)
+        return True
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+
+
+def make_handler(journal, panel, monitor=None, settings=None, traffic=None, incidents=None, check_entity=None):
+    check_entity = check_entity or entity_exists
     class Handler(BaseHTTPRequestHandler):
         server_version = 'ZigbeeMonitor'
         sys_version = ''
@@ -1863,10 +2678,48 @@ def make_handler(journal, panel, monitor=None, settings=None):
             self.end_headers()
             self.wfile.write(data)
 
+        def _json(self, code, data):
+            self._send(code, json.dumps(data, ensure_ascii=False), 'application/json; charset=utf-8')
+
+        def _download(self, name, data):
+            body = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Disposition', 'attachment; filename="%s"' % name)
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
             if not self._allowed():
                 return
-            path = self.path.split('?', 1)[0]
+            path, _, query = self.path.partition('?')
+            if path == '/api/traffic' and traffic is not None:
+                period = dict(p.partition('=')[::2] for p in query.split('&') if p).get('period', 'day')
+                if period not in TRAFFIC_PERIODS:
+                    self.send_error(400)
+                    return
+                self._json(200, traffic_view(traffic, monitor, period))
+                return
+            if (path == '/api/incidents' or path.startswith('/api/incidents/')) and incidents is not None:
+                parts = path.split('/')[3:]  # ['', 'api', 'incidents', ...]
+                if not parts:
+                    self._json(200, incidents.list())
+                elif parts == ['download']:
+                    self._download('zigbee-monitor-incidents.json', {'version': VERSION, 'incidents': incidents.all()})
+                elif len(parts) in (1, 2) and (len(parts) == 1 or parts[1] == 'download'):
+                    item = incidents.get(parts[0])
+                    if item is None:
+                        self.send_error(404)
+                    elif len(parts) == 2:
+                        self._download('zigbee-monitor-incident-%s.json' % item['id'], item)
+                    else:
+                        self._json(200, item)
+                else:
+                    self.send_error(404)
+                return
             if path in ('/', '/index.html'):
                 self._send(200, render_page(), 'text/html; charset=utf-8')
             elif path == '/api/events':
@@ -1907,16 +2760,46 @@ def make_handler(journal, panel, monitor=None, settings=None):
                     self.send_error(403)
                     return
                 try:
-                    notify = json.loads(raw or b'{}').get('notify')
-                    if not isinstance(notify, dict) or not notify or any(
+                    body = json.loads(raw or b'{}')
+                    notify = body.get('notify', {})
+                    entities = body.get('coordinator_entities')
+                    if not isinstance(notify, dict) or (not notify and entities is None) or any(
                             kind not in NOTIFY_KINDS or not isinstance(value, bool) for kind, value in notify.items()):
                         raise ValueError('invalid settings')
+                    if entities is not None and (not isinstance(entities, list) or len(entities) > ENTITIES_MAX or not all(
+                            isinstance(e, str) and ENTITY_RE.fullmatch(e) for e in entities)):
+                        raise ValueError('invalid entities')
                 except (ValueError, AttributeError):
                     self.send_error(400)
                     return
+                if entities is not None:
+                    try:
+                        unknown = [e for e in entities if not check_entity(e)]
+                    except Exception:
+                        unknown = None
+                    if unknown is None or unknown:
+                        self._json(400, {'unknown': unknown or []})
+                        return
+                    settings.set_entities(entities)
                 for kind, value in notify.items():
                     settings.set_notify(kind, value, 'panel')
                 self._send(200, json.dumps(settings_view(settings)), 'application/json; charset=utf-8')
+            elif path == '/api/incidents/delete' and incidents is not None:
+                if self.headers.get('X-Zigbee-Monitor') != 'incidents':
+                    self.send_error(403)
+                    return
+                try:
+                    body = json.loads(raw or b'{}')
+                    if body.get('all') is True:
+                        target = None
+                    elif isinstance(body.get('id'), str) and INCIDENT_ID_RE.fullmatch(body['id']):
+                        target = body['id']
+                    else:
+                        raise ValueError('invalid')
+                except (ValueError, AttributeError):
+                    self.send_error(400)
+                    return
+                self._json(200, {'deleted': incidents.delete(target)})
             elif path == '/api/devices' and monitor is not None:
                 if self.headers.get('X-Zigbee-Monitor') != 'devices':
                     self.send_error(403)
@@ -1941,9 +2824,9 @@ def make_handler(journal, panel, monitor=None, settings=None):
     return Handler
 
 
-def start_panel(journal, panel, port=PANEL_PORT, monitor=None, settings=None):
+def start_panel(journal, panel, port=PANEL_PORT, monitor=None, settings=None, traffic=None, incidents=None):
     try:
-        server = ThreadingHTTPServer(('0.0.0.0', port), make_handler(journal, panel, monitor, settings))
+        server = ThreadingHTTPServer(('0.0.0.0', port), make_handler(journal, panel, monitor, settings, traffic, incidents))
     except OSError:
         LOG.warning(t('log_panel_failed', port=port))
         return None
@@ -1978,6 +2861,13 @@ def main():
     mode = t('mqtt_auto') if broker['mode'] == 'auto' else t('mqtt_manual', host=broker['host'])
     settings = Settings()
     settings.targets, settings.discovery = bool(targets), bool(discovery)
+    heartbeat = Heartbeat()
+    stopped_at = heartbeat.unexpected_stop()
+    if stopped_at is not None:
+        text = t('unexpected_stop', time=time.strftime('%d/%m %H:%M', time.localtime(stopped_at)))
+        LOG.warning(text)
+        journal_write(SYSTEM, text)
+    heartbeat.beat()
     started = tn('started', len(targets), version=VERSION, n=len(store.watched), t=len(targets), mqtt=mode, base=base)
     if targets:
         started += ' · ' + settings.describe()
@@ -1985,14 +2875,19 @@ def main():
     monitor = Monitor(store, base)
     notifier = Notifier(targets)
     alerts = Alerts(notifier, set(monitor.expected.values()), settings=settings)
-    tracker = EventTracker(alerts=alerts)
+    traffic = Traffic()
+    incidents = Incidents(traffic, entities=settings.coordinator_entities, name_of=monitor.name_of,
+                          ieee_of=monitor.ieee_of)
+    if incidents.current is not None:
+        incidents.interruption(heartbeat.previous_time)
+    tracker = EventTracker(alerts=alerts, incidents=incidents)
     slug = own_slug()
     button_actions = queue.Queue()
     if targets:
         ActionListener(button_actions).start()
     panel = PanelState()
     panel.actions = button_actions
-    start_panel(JOURNAL, panel, monitor=monitor, settings=settings)
+    start_panel(JOURNAL, panel, monitor=monitor, settings=settings, traffic=traffic, incidents=incidents)
     announcements = discovery_messages(discovery, slug if discovery else None)
     running = True
 
@@ -2050,12 +2945,29 @@ def main():
                 if kind and value in ('ON', 'OFF'):
                     settings.set_notify(kind, value == 'ON', 'ha')
                 return
-            if monitor.wants(message.topic):
-                if monitor.receive(message.topic, message.payload):
+            topic, prefix = message.topic, base + '/'
+            if topic == prefix + 'bridge/logging':
+                incidents.z2m_log(message.payload)
+                return
+            if topic == prefix + 'bridge/health':
+                incidents.z2m_health(message.payload)
+                return
+            if monitor.wants(topic):
+                if monitor.receive(topic, message.payload):
                     new = store.observe(dict(monitor.actual))
                     if new:
                         journal_write(SYSTEM, t('new_unwatched', names=names(new)))
+                if topic == prefix + 'bridge/info':
+                    incidents.bridge_info(message.payload)
+                elif topic.endswith('/availability') and not topic.startswith(prefix + 'bridge/'):
+                    incidents.device_availability(topic[len(prefix):-len('/availability')], state(message.payload))
                 dirty = True
+            elif topic.startswith(prefix) and not topic.startswith(prefix + 'bridge/'):
+                name = topic[len(prefix):]
+                ieee = monitor.ieee_of(name)
+                if ieee:  # a device state message: only counted
+                    traffic.count(ieee)
+                    incidents.message(name)
         except (ValueError, TypeError, UnicodeError):
             LOG.warning(t('log_invalid_message'))
 
@@ -2085,6 +2997,8 @@ def main():
                 if not connected:
                     tracker.mqtt_down()
                     tracker.tick(time.monotonic())
+                    heartbeat.tick()
+                    traffic.tick()
                     time.sleep(5)
                     continue
             if client.loop(timeout=1) != mqtt.MQTT_ERR_SUCCESS:
@@ -2094,17 +3008,23 @@ def main():
                 connected = False
                 continue
             if discovery and settings.version != settings_published:
-                state = {key: settings.notifies(kind) for kind, key in NOTIFY_KINDS.items()}
-                if client.publish(SETTINGS_TOPIC, json.dumps(state), qos=1, retain=True).rc == mqtt.MQTT_ERR_SUCCESS:
+                switches = {key: settings.notifies(kind) for kind, key in NOTIFY_KINDS.items()}
+                if client.publish(SETTINGS_TOPIC, json.dumps(switches), qos=1, retain=True).rc == mqtt.MQTT_ERR_SUCCESS:
                     settings_published = settings.version
             report, changed = panel.sync(monitor, tracker)
             dirty = dirty or changed
             now = time.monotonic()
             while not button_actions.empty():
-                if alerts.action(button_actions.get(), now) == 'restart':
+                action = button_actions.get()
+                if alerts.action(action, now) == 'restart':
                     client.publish(base + '/bridge/request/restart', '', qos=1)
+                    incidents.action(t('inc_restart_requested'), restart=True)
+                elif isinstance(action, str) and '_WAIT_' in action:
+                    incidents.action(t('inc_wait'))
             tracker.observe(report, monitor.bridge, now)
             tracker.tick(now)
+            heartbeat.tick()
+            traffic.tick()
             if JOURNAL.version != journal_version:
                 dirty = True
             if (dirty and now - last_publish >= 2) or now - last_publish >= 60:
@@ -2122,6 +3042,9 @@ def main():
         journal_write(SYSTEM, t('stopped'))
         notifier.flush(5)
     finally:
+        traffic.save()
+        incidents.save()
+        heartbeat.beat(clean=True)
         if connected:
             final = dict(unavailable, recent_events=list(JOURNAL.recent))
             infos = [client.publish(STATUS, json.dumps(final, ensure_ascii=False), qos=1, retain=True),
@@ -2196,8 +3119,9 @@ td.msg { overflow-wrap: anywhere; }
 .empty { color: var(--muted); padding: 16px 8px; }
 .error { color: var(--bad); }
 @media (max-width: 600px) { td.when { white-space: normal; } }
-.tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
-.tab { padding: 8px 14px; border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 0 0 auto; white-space: nowrap; padding: 8px 14px; border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
 .tab.active { color: var(--text); border-bottom-color: var(--info); font-weight: 600; }
 .tab:hover { background: none; color: var(--text); }
 .banner { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -2234,7 +3158,29 @@ button:disabled { opacity: .45; cursor: default; }
 .sep.online { color: var(--ok); }
 .sep.offline, .sep.missing { color: var(--bad); }
 .sep.unknown { color: var(--warn); }
-#view-settings h2 { font-size: 15px; margin: 0 0 4px; }
+#view-settings h2, #view-incidents h2, #view-traffic h2 { font-size: 15px; margin: 0 0 4px; }
+#view-incidents h3 { font-size: 13px; margin: 16px 0 6px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: none; border-radius: 0; color: var(--text); padding: 6px 12px; }
+.seg button.active { background: var(--info); color: #fff; }
+.meter { height: 5px; background: var(--neutral-bg); border-radius: 3px; margin-top: 4px; }
+.meter div { height: 100%; background: var(--info); border-radius: 3px; min-width: 2px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.click { cursor: pointer; }
+tr.click:hover, tr.sel { background: var(--neutral-bg); }
+.pill.self { color: var(--ok); background: var(--ok-bg); }
+.pill.restart, .pill.interruption { color: var(--warn); background: var(--warn-bg); }
+.pill.not_recovered, .pill.open { color: var(--bad); background: var(--bad-bg); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 13px; }
+.kv b { font-weight: 600; color: var(--muted); }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+a.button { display: inline-block; text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; }
+.scroll { overflow-x: auto; }
+@media (max-width: 600px) {
+  .kv { grid-template-columns: 1fr; }
+  .kv span { margin-bottom: 4px; }
+  .wide { display: none; }
+}
 .setting { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
 .setting input { flex: 0 0 auto; min-width: 0; width: 18px; height: 18px; margin-top: 2px; }
 .setting label { flex: 1; min-width: 0; cursor: pointer; }
@@ -2252,6 +3198,8 @@ button:disabled { opacity: .45; cursor: default; }
   <nav class="tabs">
     <button class="tab active" id="tab-status" data-t="tab_status"></button>
     <button class="tab" id="tab-devices" data-t="tab_devices"></button>
+    <button class="tab" id="tab-traffic" data-t="tab_traffic"></button>
+    <button class="tab" id="tab-incidents" data-t="tab_incidents"></button>
     <button class="tab" id="tab-settings" data-t="tab_settings"></button>
   </nav>
   <div id="view-status">
@@ -2316,12 +3264,48 @@ button:disabled { opacity: .45; cursor: default; }
       </div>
     </section>
   </div>
+  <div id="view-traffic" class="hidden">
+    <section class="card">
+      <div class="toolbar"><span class="seg" id="periods"></span><span class="muted" id="traffic-total"></span></div>
+      <div class="muted" data-t="traffic_help"></div>
+      <div class="muted" id="traffic-since"></div>
+      <div class="banner hidden" id="traffic-coverage"></div>
+      <div class="scroll"><table>
+        <thead><tr><th data-t="col_device"></th><th class="num" data-t="col_messages"></th><th class="num" data-t="col_per_min"></th><th class="num" data-t="col_pct"></th></tr></thead>
+        <tbody id="traffic-rows"></tbody>
+      </table></div>
+    </section>
+  </div>
+  <div id="view-incidents" class="hidden">
+    <section class="card">
+      <div class="muted" data-t="inc_help"></div>
+      <div id="inc-summary"></div>
+      <div class="actions" style="margin: 10px 0">
+        <a class="button" id="inc-download-all" href="api/incidents/download" download data-t="download_all"></a>
+        <button class="neutral" id="inc-delete-all" data-t="delete_all"></button>
+      </div>
+      <div class="scroll"><table>
+        <thead><tr><th data-t="col_date"></th><th data-t="col_trigger"></th><th data-t="col_duration"></th><th data-t="col_outcome"></th><th class="wide" data-t="col_affected"></th></tr></thead>
+        <tbody id="inc-rows"></tbody>
+      </table></div>
+    </section>
+    <section class="card hidden" id="inc-detail"></section>
+  </div>
   <div id="view-settings" class="hidden">
     <section class="card">
       <h2 data-t="settings_notify"></h2>
       <div class="muted" data-t="settings_notify_help"></div>
       <div class="banner hidden" id="no-targets"><b data-t="settings_no_targets"></b></div>
       <div id="notify-settings"></div>
+    </section>
+    <section class="card">
+      <h2 data-t="settings_incidents"></h2>
+      <div class="muted" data-t="settings_entities_help"></div>
+      <div class="toolbar" style="margin-top: 10px">
+        <input id="entities" type="text" autocomplete="off" spellcheck="false">
+        <button class="primary" id="entities-save" data-t="save"></button>
+      </div>
+      <div class="muted" id="entities-status"></div>
     </section>
   </div>
 </main>
@@ -2354,15 +3338,222 @@ function setup() {
   for (const type of TYPES) { const o = el('option', '', T.types[type]); o.value = type; $('filter').append(o); }
 }
 
+const TABS = ['status', 'devices', 'traffic', 'incidents', 'settings'];
+let tab = 'status';
+
 function showTab(name) {
-  $('tab-status').classList.toggle('active', name === 'status');
-  $('tab-devices').classList.toggle('active', name === 'devices');
-  $('tab-settings').classList.toggle('active', name === 'settings');
-  $('view-status').classList.toggle('hidden', name !== 'status');
-  $('view-devices').classList.toggle('hidden', name !== 'devices');
-  $('view-settings').classList.toggle('hidden', name !== 'settings');
+  tab = name;
+  for (const other of TABS) {
+    $('tab-' + other).classList.toggle('active', other === name);
+    $('view-' + other).classList.toggle('hidden', other !== name);
+  }
   if (name === 'devices') loadDevices();
+  if (name === 'traffic') loadTraffic();
+  if (name === 'incidents') loadIncidents();
   if (name === 'settings') loadSettings();
+}
+
+const num = (n) => (n === null || n === undefined ? '–' : Number(n).toLocaleString());
+
+function fmtDur(s) {
+  if (s === null || s === undefined) return '–';
+  if (s < 60) return s + ' s';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + ' min';
+  const h = Math.floor(m / 60);
+  if (h < 48) return h + ' h ' + (m % 60) + ' min';
+  return (h / 24).toFixed(1) + ' d';
+}
+
+// ---------- Traffic ----------
+let period = 'day';
+
+async function loadTraffic() {
+  try {
+    const r = await fetch('api/traffic?period=' + period, { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderTraffic(await r.json());
+  } catch (err) {
+    $('refreshed').className = 'error';
+    $('refreshed').textContent = fmt(T.refresh_failed, { error: err.message });
+  }
+}
+
+function renderTraffic(data) {
+  const seg = $('periods'); seg.replaceChildren();
+  for (const p of ['hour', 'day', 'week', 'month']) {
+    const b = el('button', p === period ? 'active' : '', T.periods[p]);
+    b.addEventListener('click', () => { period = p; loadTraffic(); });
+    seg.append(b);
+  }
+  $('traffic-total').textContent = fmt(T.traffic_total, { total: num(data.total), per_min: num(data.per_min), n: data.rows.length });
+  $('traffic-since').textContent = data.since ? fmt(T.traffic_since, { since: new Date(data.since).toLocaleString() }) : '';
+  const partial = data.rows.length && data.coverage < 0.95;
+  $('traffic-coverage').classList.toggle('hidden', !partial);
+  $('traffic-coverage').textContent = fmt(T.traffic_coverage, { pct: Math.round(data.coverage * 100) });
+  const body = $('traffic-rows'); body.replaceChildren();
+  const top = data.rows.length ? data.rows[0].messages : 1;
+  for (const row of data.rows) {
+    const tr = el('tr');
+    const td = el('td', 'msg');
+    td.append(document.createTextNode(row.name + ' '),
+              el('span', 'pill ' + (row.watched ? 'new' : 'since'), row.watched ? T.tag_watched : T.tag_unwatched));
+    const meter = el('div', 'meter'); const fill = el('div'); fill.style.width = (100 * row.messages / top) + '%';
+    meter.append(fill); td.append(meter);
+    tr.append(td, el('td', 'num', num(row.messages)), el('td', 'num', num(row.per_min)), el('td', 'num', row.pct + '%'));
+    body.append(tr);
+  }
+  if (!data.rows.length) {
+    const tr = el('tr'); const td = el('td', 'empty', T.traffic_empty); td.colSpan = 4; tr.append(td); body.append(tr);
+  }
+}
+
+// ---------- Incidents ----------
+let incident = null;
+
+async function loadIncidents() {
+  try {
+    const r = await fetch('api/incidents', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderIncidents(await r.json());
+  } catch (err) {
+    $('refreshed').className = 'error';
+    $('refreshed').textContent = fmt(T.refresh_failed, { error: err.message });
+  }
+}
+
+function outcomePill(item) {
+  const key = item.status === 'open' ? 'open' : item.outcome;
+  return el('span', 'pill ' + key, T.outcomes[key] || key || '–');
+}
+
+function renderIncidents(data) {
+  const s = data.summary;
+  const box = $('inc-summary'); box.replaceChildren();
+  const parts = [fmt(T.inc_count, { n: s.count })];
+  if (s.mean_interval_s) parts.push(fmt(T.inc_interval, { d: fmtDur(s.mean_interval_s) }));
+  if (s.mean_duration_s !== null && s.mean_duration_s !== undefined) parts.push(fmt(T.inc_mean_duration, { d: fmtDur(s.mean_duration_s) }));
+  box.append(el('p', '', parts.join(' · ')));
+  if (s.hours.length) box.append(el('div', 'muted', fmt(T.inc_hours, { hours: s.hours.map(([h, n]) => h + ':00 (' + n + ')').join(', ') })));
+  if (s.repeated_errors.length) {
+    box.append(el('h3', '', T.inc_repeated));
+    for (const [text, n] of s.repeated_errors) box.append(el('div', 'muted', '×' + n + ' ' + text));
+  }
+  const body = $('inc-rows'); body.replaceChildren();
+  for (const item of data.incidents) {
+    const tr = el('tr', 'click' + (incident === item.id ? ' sel' : ''));
+    tr.addEventListener('click', () => showIncident(item.id));
+    const out = el('td'); out.append(outcomePill(item));
+    const when = item.start ? item.start.slice(8, 10) + '/' + item.start.slice(5, 7) + '/' + item.start.slice(2, 4) + ' ' + item.start.slice(11, 16) : '–';
+    tr.append(el('td', 'when', when), el('td', '', T.triggers[item.trigger] || item.trigger),
+              el('td', 'num', fmtDur(item.duration_s)), out,
+              el('td', 'msg wide', item.affected.length ? item.affected.length + ': ' + item.affected.slice(0, 4).join(', ') + (item.affected.length > 4 ? '…' : '') : '–'));
+    body.append(tr);
+  }
+  if (!data.incidents.length) {
+    const tr = el('tr'); const td = el('td', 'empty', T.inc_empty); td.colSpan = 5; tr.append(td); body.append(tr);
+  }
+  $('inc-delete-all').disabled = !data.incidents.some((i) => i.status === 'closed');
+}
+
+function kv(pairs) {
+  const box = el('div', 'kv');
+  for (const [k, v] of pairs) box.append(el('b', '', k), el('span', '', v === null || v === undefined || v === '' ? '–' : String(v)));
+  return box;
+}
+
+function lines(title, entries, dropped) {
+  const frag = document.createDocumentFragment();
+  frag.append(el('h3', '', title));
+  const table = el('table'); const body = el('tbody');
+  for (const e of entries) {
+    const tr = el('tr');
+    tr.append(el('td', 'when', (e.t || '').slice(11)), el('td', 'msg', e.text));
+    body.append(tr);
+  }
+  if (!entries.length) { const tr = el('tr'); tr.append(el('td', 'empty', T.none)); body.append(tr); }
+  table.append(body); frag.append(table);
+  if (dropped) frag.append(el('div', 'muted', fmt(T.inc_dropped, { n: dropped })));
+  return frag;
+}
+
+async function showIncident(id) {
+  try {
+    const r = await fetch('api/incidents/' + encodeURIComponent(id), { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    incident = id;
+    renderIncident(await r.json());
+    loadIncidents();
+  } catch (err) {
+    alert(fmt(T.refresh_failed, { error: err.message }));
+  }
+}
+
+function renderIncident(d) {
+  const box = $('inc-detail'); box.replaceChildren(); box.classList.remove('hidden');
+  const head = el('div', 'actions');
+  head.append(el('h2', '', fmt(T.inc_detail, { start: (d.start_text || '').replace('T', ' ') })), el('span', 'spacer'));
+  const dl = el('a', 'button', T.download); dl.href = 'api/incidents/' + encodeURIComponent(d.id) + '/download'; dl.setAttribute('download', '');
+  head.append(dl);
+  if (d.status === 'closed') {
+    const del = el('button', 'neutral', T.delete);
+    del.addEventListener('click', () => deleteIncidents({ id: d.id }, T.confirm_delete));
+    head.append(del);
+  }
+  box.append(head);
+  const out = el('div'); out.append(outcomePill(d));
+  box.append(out, kv([
+    [T.col_trigger, T.triggers[d.trigger] || d.trigger], [T.inc_start, (d.start_text || '').replace('T', ' ')],
+    [T.inc_end, (d.end_text || '').replace('T', ' ')], [T.col_duration, fmtDur(d.duration_s)],
+    [T.inc_interruptions, d.interruptions || 0],
+  ]));
+  if (d.late_recovery) box.append(el('div', 'muted', fmt(T.late_recovery, { when: d.late_recovery.replace('T', ' ') })));
+  box.append(el('h3', '', T.inc_affected));
+  const at = el('table'); const ab = el('tbody');
+  const hdr = el('tr'); for (const h of [T.col_device, T.col_kind, T.col_down_at, T.col_back_at]) hdr.append(el('th', '', h)); ab.append(hdr);
+  for (const a of d.affected || []) {
+    const tr = el('tr');
+    tr.append(el('td', 'msg', a.name), el('td', '', T.status[a.kind] || a.kind), el('td', 'when', (a.at || '').slice(11)), el('td', 'when', a.back ? a.back.slice(11) : '–'));
+    ab.append(tr);
+  }
+  at.append(ab); box.append(el('div', 'scroll')); box.lastChild.append(at);
+  const c = d.coordinator || {};
+  box.append(el('h3', '', T.inc_coordinator), kv([['Zigbee2MQTT', c.zigbee2mqtt], [T.k_type, c.type], [T.k_firmware, c.revision], [T.k_adapter, c.adapter], [T.k_port, c.port]]));
+  box.append(el('h3', '', T.inc_before));
+  const tr = d.traffic || {};
+  if (d.last_message) box.append(el('div', '', fmt(T.inc_last_message, { device: d.last_message.device, time: (d.last_message.t || '').slice(11) })));
+  box.append(kv([
+    [T.inc_per_minute, (tr.messages_per_minute || []).join(' · ')],
+    [T.inc_info_logs, (tr.z2m_info_logs_per_minute || []).join(' · ')],
+    [T.inc_busiest, (tr.busiest || []).map((b) => b.name + ' (' + b.messages + ')').join(', ')],
+  ]));
+  const h = d.health || {};
+  box.append(el('h3', '', T.inc_health_title), kv([[T.k_uptime, fmtDur(h.uptime_s)], [T.k_memory, h.memory_mb], [T.k_load, h.os_load], [T.k_queued, h.mqtt_queued], [T.k_published, h.mqtt_published]]));
+  const ents = d.entities || {};
+  if (ents.start || ents.end) {
+    box.append(el('h3', '', T.inc_entities));
+    const rows = [];
+    for (const [label, key] of [[T.inc_at_start, 'start'], [T.inc_at_end, 'end']]) {
+      for (const [entity, v] of Object.entries(ents[key] || {})) rows.push([entity + ' (' + label + ')', v.error ? v.error : (v.state + (v.unit ? ' ' + v.unit : ''))]);
+    }
+    box.append(kv(rows));
+  }
+  box.append(lines(T.inc_context, d.context || [], d.context_dropped));
+  box.append(lines(T.inc_timeline, d.timeline || [], d.timeline_dropped));
+}
+
+async function deleteIncidents(body, question) {
+  if (!confirm(question)) return;
+  try {
+    const r = await fetch('api/incidents/delete', { method: 'POST', headers: { 'X-Zigbee-Monitor': 'incidents', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (body.all || body.id === incident) { incident = null; $('inc-detail').classList.add('hidden'); }
+  } catch (err) {
+    alert(fmt(T.delete_failed, { error: err.message }));
+  }
+  loadIncidents();
+  load();
 }
 
 let settings = null;
@@ -2398,9 +3589,37 @@ async function loadSettings() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     settings = await r.json();
     renderSettings();
+    renderEntities();
   } catch (err) {
     $('refreshed').className = 'error';
     $('refreshed').textContent = fmt(T.refresh_failed, { error: err.message });
+  }
+}
+
+function renderEntities() {
+  if (!settings) return;
+  if (document.activeElement !== $('entities')) $('entities').value = settings.coordinator_entities.join(', ');
+}
+
+async function saveEntities() {
+  const list = $('entities').value.split(/[\s,]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const status = $('entities-status');
+  if (list.length > 10 || list.some((e) => !/^[a-z_]+\.[a-z0-9_]+$/.test(e))) { status.className = 'error'; status.textContent = T.settings_entities_invalid; return; }
+  try {
+    const r = await fetch('api/settings', { method: 'POST', headers: { 'X-Zigbee-Monitor': 'settings', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coordinator_entities: list }) });
+    if (r.status === 400) {
+      const data = await r.json().catch(() => ({}));
+      status.className = 'error';
+      status.textContent = data.unknown ? fmt(T.settings_entities_unknown, { entities: data.unknown.join(', ') || '?' }) : T.settings_entities_invalid;
+      return;
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    settings = await r.json();
+    status.className = 'muted'; status.textContent = T.saved;
+    $('entities').blur(); renderEntities(); load();
+  } catch (err) {
+    status.className = 'error'; status.textContent = fmt(T.settings_failed, { error: err.message });
   }
 }
 
@@ -2595,6 +3814,11 @@ setup();
 $('tab-status').addEventListener('click', () => showTab('status'));
 $('tab-devices').addEventListener('click', () => showTab('devices'));
 $('tab-settings').addEventListener('click', () => showTab('settings'));
+$('tab-traffic').addEventListener('click', () => showTab('traffic'));
+$('tab-incidents').addEventListener('click', () => showTab('incidents'));
+$('inc-delete-all').addEventListener('click', () => deleteIncidents({ all: true }, T.confirm_delete_all));
+$('entities-save').addEventListener('click', saveEntities);
+$('entities').placeholder = T.settings_entities_placeholder;
 $('setup-choose').addEventListener('click', () => showTab('devices'));
 $('setup-all').addEventListener('click', () => devices && changeDevices(devices.unwatched.map((d) => d.ieee), []));
 $('filter').addEventListener('change', renderEvents);
@@ -2637,7 +3861,7 @@ $('clear').addEventListener('click', async () => {
 });
 load();
 loadDevices();
-setInterval(() => { load(); loadDevices(); if (!$('view-settings').classList.contains('hidden')) loadSettings(); }, 10000);
+setInterval(() => { load(); loadDevices(); if (tab === 'settings') loadSettings(); if (tab === 'traffic') loadTraffic(); if (tab === 'incidents') loadIncidents(); }, 10000);
 </script>
 </body>
 </html>
