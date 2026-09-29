@@ -38,6 +38,17 @@ check('vista: vigilados y sin vigilar (nuevo marcado)', [x['name'] for x in w] =
 st2.seen[C] = '2026-09-01T10:00:00'
 w, u = st2.view(renamed, lambda i: 'online')
 check('vista: antiguo no es nuevo', {x['name']: x['new'] for x in u}['Puerta C'] is False)
+# problems first (offline, missing, no data, online), each group by name
+mix = m.DeviceStore(Path(TMP) / 'mix.json')
+ids = ['0x%016x' % i for i in range(10, 17)]
+names_ = ['zeta', 'Alfa', 'beta', 'Gamma', 'delta', 'Epsilon', 'eta']
+status_ = dict(zip(ids, ['online', 'unknown', 'offline', 'missing', 'offline', 'online', 'unknown']))
+present = dict(zip(ids, names_))
+mix.update(ids, [], present)
+w, _ = mix.view(present, lambda i: status_[i])
+check('vista: problemas arriba por grupo y por nombre', [(x['status'], x['name']) for x in w] == [
+    ('offline', 'beta'), ('offline', 'delta'), ('missing', 'Gamma'), ('unknown', 'Alfa'), ('unknown', 'eta'),
+    ('online', 'Epsilon'), ('online', 'zeta')], w)
 
 # ---------- Monitor + report ----------
 path.unlink()
@@ -132,6 +143,7 @@ except urllib.error.HTTPError as e:
 r = post({'remove': [B]})
 check('sin datos de Z2M: quitar sí funciona', r['removed'] == ['Sensor B'] and store.watched == set())
 html = urllib.request.urlopen(base + '/').read().decode()
+check('panel: separadores de color por estado', "el('div', 'sep ' + group" in html and '.sep.offline' in html)
 check('página con pestañas y sin innerHTML', 'tab-devices' in html and 'innerHTML' not in html and '"tab_devices": "Dispositivos"' in html)
 srv.shutdown()
 print('\nFALLOS:', fails); sys.exit(1 if fails else 0)

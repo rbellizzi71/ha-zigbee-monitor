@@ -20,12 +20,13 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = '1.2.1'
+VERSION = '1.3.0'
 DATA = Path(os.environ.get('ZM_DATA', '/data'))
 OPTIONS = DATA / 'options.json'
 DEVICES = DATA / 'devices.json'
 EVENTS = DATA / 'eventos.log'
 ALERTS = DATA / 'notificados.json'
+SETTINGS = DATA / 'settings.json'
 ALERT_DELAY = int(os.environ.get('ZM_ALERT_DELAY', '120'))  # Z2M offline / MQTT lost must last this long
 # Device notifications are grouped: each change restarts the wait; the net result is sent after
 # NOTIFY_GROUP seconds without changes.
@@ -56,6 +57,7 @@ PANEL_PORT = int(os.environ.get('ZM_PANEL_PORT', '8099'))
 INGRESS_PEERS = ('172.30.32.2', '127.0.0.1')
 DEFAULT_BASE = 'zigbee2mqtt'  # Zigbee2MQTT base_topic (option z2m_base_topic)
 STATUS = 'zigbee_monitor/status'
+SETTINGS_TOPIC = 'zigbee_monitor/settings'  # retained switch states; commands on <topic>/<key>/set
 AVAILABILITY = 'zigbee_monitor/availability'
 DISCOVERY_PREFIX = 'homeassistant'
 LANGUAGES = ('es', 'en')
@@ -221,6 +223,7 @@ def mqtt_settings(options, service=None):
 
 
 IEEE_RE = re.compile(r'0x[0-9a-f]{16}')
+STATUS_ORDER = {'offline': 0, 'missing': 1, 'unknown': 2, 'online': 3}  # watched list in the panel
 
 
 class DeviceStore:
@@ -335,7 +338,9 @@ class DeviceStore:
                     recent = False
                 unwatched.append({'ieee': ieee, 'name': name, 'first_seen': first, 'new': recent})
         key = lambda item: item['name'].lower()
-        return sorted(watched, key=key), sorted(unwatched, key=key)
+        # Watched: problems first (offline, missing, no data, online), each group by name.
+        watched_key = lambda item: (STATUS_ORDER.get(item['status'], len(STATUS_ORDER)), key(item))
+        return sorted(watched, key=watched_key), sorted(unwatched, key=key)
 
 
 def availability_enabled(config):
@@ -593,6 +598,19 @@ MESSAGES = {
         'entity_problem': 'Problema',
         'entity_offline': 'Offline',
         'entity_missing': 'Desaparecidos',
+        'entity_notify_devices': 'Notificar dispositivos',
+        'entity_notify_general': 'Notificar fallo general',
+        'entity_notify_system': 'Notificar sistema',
+        'log_settings_save_failed': 'No se pudieron guardar los ajustes',
+        'settings_changed': '{what}: {state} ({source})',
+        'notify_devices': 'Notificaciones de dispositivos',
+        'notify_general': 'Notificaciones de fallo general',
+        'notify_system': 'Notificaciones del sistema',
+        'state_on': 'activadas', 'state_off': 'desactivadas',
+        'source_panel': 'panel', 'source_ha': 'Home Assistant',
+        'kind_devices': 'dispositivos', 'kind_general': 'fallo general', 'kind_system': 'sistema',
+        'notify_all': 'Notificaciones: todas', 'notify_none': 'Notificaciones: todas desactivadas',
+        'notify_some': 'Notificaciones: {on} ({off}: desactivadas)',
     },
     'en': {
         'started_one': 'Monitor started (v{version}): {n} watched devices, {t} notification target · MQTT: {mqtt} · Z2M: {base}',
@@ -677,6 +695,19 @@ MESSAGES = {
         'entity_problem': 'Problem',
         'entity_offline': 'Offline',
         'entity_missing': 'Missing',
+        'entity_notify_devices': 'Notify devices',
+        'entity_notify_general': 'Notify general failure',
+        'entity_notify_system': 'Notify system',
+        'log_settings_save_failed': 'Could not save the settings',
+        'settings_changed': '{what}: {state} ({source})',
+        'notify_devices': 'Device notifications',
+        'notify_general': 'General-failure notifications',
+        'notify_system': 'System notifications',
+        'state_on': 'on', 'state_off': 'off',
+        'source_panel': 'panel', 'source_ha': 'Home Assistant',
+        'kind_devices': 'devices', 'kind_general': 'general failure', 'kind_system': 'system',
+        'notify_all': 'Notifications: all', 'notify_none': 'Notifications: all off',
+        'notify_some': 'Notifications: {on} ({off}: off)',
     },
 }
 
@@ -694,7 +725,14 @@ PANEL_TEXTS = {
         'refreshed': 'Actualizado {time}', 'refresh_failed': 'No se pudo actualizar ({error})',
         'confirm_clear': '¿Seguro que quieres borrar todo el historial de eventos? Esta acción no se puede deshacer.',
         'clear_failed': 'No se pudo borrar el historial: {error}',
-        'tab_status': 'Estado', 'tab_devices': 'Dispositivos',
+        'tab_status': 'Estado', 'tab_devices': 'Dispositivos', 'tab_settings': 'Ajustes',
+        'settings_notify': 'Notificaciones',
+        'settings_notify_help': 'Elige qué avisos llegan a tus destinos de notificación. El historial, el panel y las entidades siguen registrándolo todo.',
+        'set_devices': 'Dispositivos', 'set_devices_help': 'Nuevo offline, desaparecido y recuperado.',
+        'set_general': 'Fallo general', 'set_general_help': 'Aviso de fallo general (con sus botones) y "Red estable". Desactivado: los dispositivos perdidos llegan en el aviso de dispositivos, con sus nombres.',
+        'set_system': 'Sistema', 'set_system_help': 'Zigbee2MQTT o MQTT caídos más de 2 minutos, ningún dispositivo vigilado, disponibilidad desactivada.',
+        'settings_no_targets': 'No hay destinos de notificación configurados (opción notify_targets): estos ajustes no tienen efecto.',
+        'settings_failed': 'No se pudo guardar el ajuste: {error}',
         'setup_banner': 'Todavía no vigilas ningún dispositivo. Elige cuáles vigilar para que el monitor pueda avisarte.',
         'choose_devices': 'Elegir dispositivos', 'watch_all_n': 'Vigilar todos ({n})',
         'reason_no_devices': 'Motivo: ningún dispositivo seleccionado',
@@ -733,7 +771,14 @@ PANEL_TEXTS = {
         'refreshed': 'Updated {time}', 'refresh_failed': 'Could not update ({error})',
         'confirm_clear': 'Are you sure you want to clear the whole event history? This cannot be undone.',
         'clear_failed': 'Could not clear the history: {error}',
-        'tab_status': 'Status', 'tab_devices': 'Devices',
+        'tab_status': 'Status', 'tab_devices': 'Devices', 'tab_settings': 'Settings',
+        'settings_notify': 'Notifications',
+        'settings_notify_help': 'Choose which alerts reach your notification targets. The history, the panel and the entities keep recording everything.',
+        'set_devices': 'Devices', 'set_devices_help': 'New offline, missing and recovered.',
+        'set_general': 'General failure', 'set_general_help': 'General-failure notice (with its buttons) and "Network stable". Off: the lost devices come in the device notification, with their names.',
+        'set_system': 'System', 'set_system_help': 'Zigbee2MQTT or MQTT down for more than 2 minutes, no device watched, availability disabled.',
+        'settings_no_targets': 'No notification target is configured (notify_targets option): these settings have no effect.',
+        'settings_failed': 'Could not save the setting: {error}',
         'setup_banner': 'You are not watching any device yet. Choose which ones to watch so the monitor can alert you.',
         'choose_devices': 'Choose devices', 'watch_all_n': 'Watch all ({n})',
         'reason_no_devices': 'Reason: no device selected',
@@ -1142,6 +1187,73 @@ class Notifier:
             self.queue.task_done()
 
 
+# Kinds of notification the user can turn off (panel "Settings" tab and Home Assistant switches):
+# kind -> switch key. Only sending is affected: history, log, panel and entities never change.
+NOTIFY_KINDS = {'devices': 'notify_devices', 'general': 'notify_general_failure', 'system': 'notify_system'}
+
+
+class Settings:
+    """Settings changed live, without a restart, from the panel or from Home Assistant switches.
+    Kept in /data/settings.json; every notification kind is on unless turned off."""
+
+    def __init__(self, path=SETTINGS):
+        self.path = Path(path)
+        self.lock = threading.Lock()
+        self.version = 0          # bumped on every change: the main loop republishes the switches
+        self.targets = False      # set by main(): whether any notification target is configured
+        self.discovery = False    # set by main(): whether the Home Assistant switches exist
+        try:
+            data = json.loads(self.path.read_text())
+        except (FileNotFoundError, ValueError, OSError):
+            data = {}
+        notify = data.get('notify') if isinstance(data, dict) else None
+        notify = notify if isinstance(notify, dict) else {}
+        self.notify = {kind: notify.get(kind) is not False for kind in NOTIFY_KINDS}
+
+    def notifies(self, kind):
+        with self.lock:
+            return self.notify[kind]
+
+    def snapshot(self):
+        with self.lock:
+            return dict(self.notify)
+
+    def _save(self):
+        temporary = self.path.with_suffix('.tmp')
+        try:
+            temporary.write_text(json.dumps({'notify': self.notify}, sort_keys=True))
+            os.replace(temporary, self.path)
+        except OSError:
+            LOG.warning(t('log_settings_save_failed'))
+
+    def set_notify(self, kind, value, source):
+        """source: 'panel' or 'ha'. Writes one history line when something changes."""
+        if kind not in NOTIFY_KINDS or not isinstance(value, bool):
+            raise ValueError('invalid setting')
+        with self.lock:
+            if self.notify[kind] == value:
+                return False
+            self.notify[kind] = value
+            self._save()
+            self.version += 1
+        text = t('settings_changed', what=t('notify_' + kind), state=t('state_on' if value else 'state_off'),
+                 source=t('source_' + source))
+        LOG.info(text)
+        journal_write(SYSTEM, text)
+        return True
+
+    def describe(self):
+        """For the start line: which notifications are on."""
+        notify = self.snapshot()
+        on = [t('kind_' + kind) for kind in NOTIFY_KINDS if notify[kind]]
+        off = [t('kind_' + kind) for kind in NOTIFY_KINDS if not notify[kind]]
+        if not off:
+            return t('notify_all')
+        if not on:
+            return t('notify_none')
+        return t('notify_some', on=', '.join(on), off=', '.join(off))
+
+
 class Alerts:
     """Decides which notifications to send and remembers what was already notified.
 
@@ -1156,8 +1268,9 @@ class Alerts:
     buttons; then silence until the network is stable again, told in one final message.
     """
 
-    def __init__(self, notifier, expected_names, path=ALERTS, delay=None, group=None):
+    def __init__(self, notifier, expected_names, path=ALERTS, delay=None, group=None, settings=None):
         self.notifier = notifier
+        self.settings = settings  # None: every kind is notified
         self.path = Path(path)
         self.delay = ALERT_DELAY if delay is None else delay
         self.group = NOTIFY_GROUP if group is None else group
@@ -1195,6 +1308,15 @@ class Alerts:
         except (FileNotFoundError, ValueError, OSError):
             return {}
 
+    def _on(self, kind):
+        return self.settings is None or self.settings.notifies(kind)
+
+    def _send(self, kind, message, extra=None):
+        """Send unless that kind is turned off. The memory is updated by the callers either way,
+        so turning a kind back on never sends stale news."""
+        if self._on(kind):
+            self.notifier.send(message, extra) if extra else self.notifier.send(message)
+
     def _save(self):
         if not self.enabled:
             return
@@ -1228,7 +1350,7 @@ class Alerts:
         self.setup_alerted = no_devices
         self._save()
         if no_devices:
-            self.notifier.send(t('alert_setup'))
+            self._send('system', t('alert_setup'))
 
     def availability(self, disabled):
         """One notice while Zigbee2MQTT availability is disabled (again only after it was enabled)."""
@@ -1237,7 +1359,7 @@ class Alerts:
         self.availability_alerted = disabled
         self._save()
         if disabled:
-            self.notifier.send(t('alert_availability'))
+            self._send('system', t('alert_availability'))
 
     def devices(self, payload, now):
         """A new device state (called when it changes). Notified later, grouped, by flush();
@@ -1269,7 +1391,9 @@ class Alerts:
                 general['recovering'] = now
             return
         new_offline, new_missing, _ = self._changes(current)
-        if len(self.losses) >= GENERAL_FAILURE or len(new_offline) + len(new_missing) >= GENERAL_FAILURE:
+        # General failure turned off: the losses are sent as a normal grouped message, with names.
+        if self._on('general') and (
+                len(self.losses) >= GENERAL_FAILURE or len(new_offline) + len(new_missing) >= GENERAL_FAILURE):
             self._start_general(current, now)
 
     def _changes(self, current):
@@ -1300,7 +1424,7 @@ class Alerts:
         self.problems, self.current, self.first_change, self.last_change = current, None, None, None
         self.losses.clear()
         self._save()
-        self.notifier.send(t('general_failure', n=lost), extra)
+        self._send('general', t('general_failure', n=lost), extra)
 
     def _down_since_failure(self, state):
         return sorted(n for n in state if n not in self.general['baseline'])
@@ -1333,7 +1457,7 @@ class Alerts:
         parts.append(t('total', offline=offline, missing=missing) if current else t('all_online'))
         self.problems = current
         self._save()
-        self.notifier.send(' · '.join(parts))
+        self._send('devices', ' · '.join(parts))
 
     def _flush_general(self, now):
         general = self.general
@@ -1353,14 +1477,14 @@ class Alerts:
             self.general = None
             self.losses.clear()
             self._save()
-            self.notifier.send(message, {'tag': NOTIFY_TAG})  # replaces the failure notification
+            self._send('general', message, {'tag': NOTIFY_TAG})  # replaces the failure notification
             return
         if general['remind_at'] is not None and now >= general['remind_at']:
             general['remind_at'] = None
             down = self._down_since_failure(state)
             if down:
                 extra = self._new_nonce(now)
-                self.notifier.send(tn('still_down', len(down), n=len(down)), extra)
+                self._send('general', tn('still_down', len(down), n=len(down)), extra)
 
     def action(self, name, now):
         """A notification button was tapped. Returns 'restart' when Zigbee2MQTT must be restarted."""
@@ -1369,7 +1493,7 @@ class Alerts:
                 return None
             self.general['remind_at'] = None
             self.write(SYSTEM, t('panel_restart'))
-            self.notifier.send(t('restart_requested'), {'tag': NOTIFY_TAG})
+            self._send('general', t('restart_requested'), {'tag': NOTIFY_TAG})
             return 'restart'
         if not isinstance(name, str) or not name.startswith(ACTION_PREFIX):
             return None
@@ -1384,7 +1508,7 @@ class Alerts:
             general['restarted'] = True
             general['remind_at'] = None
             self.write(SYSTEM, t('action_restart'))
-            self.notifier.send(t('restart_requested'), {'tag': NOTIFY_TAG})
+            self._send('general', t('restart_requested'), {'tag': NOTIFY_TAG})
             return 'restart'
         if kind == 'WAIT':
             general['remind_at'] = now + WAIT_REMINDER
@@ -1401,26 +1525,26 @@ class Alerts:
             if not self.mqtt_alerted and now - self.mqtt_since >= self.delay:
                 self.mqtt_alerted = True
                 self._save()
-                self.notifier.send(t('alert_mqtt_down', m=minutes))
+                self._send('system', t('alert_mqtt_down', m=minutes))
             return
         if mqtt == 'up':
             self.mqtt_since = None
             if self.mqtt_alerted:
                 self.mqtt_alerted = False
                 self._save()
-                self.notifier.send(t('alert_mqtt_back'))
+                self._send('system', t('alert_mqtt_back'))
             if bridge == 'offline':
                 self.z2m_since = now if self.z2m_since is None else self.z2m_since
                 if not self.z2m_alerted and now - self.z2m_since >= self.delay:
                     self.z2m_alerted = True
                     self._save()
-                    self.notifier.send(t('alert_z2m_down', m=minutes))
+                    self._send('system', t('alert_z2m_down', m=minutes))
             elif bridge == 'online':
                 self.z2m_since = None
                 if self.z2m_alerted:
                     self.z2m_alerted = False
                     self._save()
-                    self.notifier.send(t('alert_z2m_back'))
+                    self._send('system', t('alert_z2m_back'))
 
 
 class NoAlerts:
@@ -1603,7 +1727,7 @@ def discovery_messages(enabled, slug=None):
     """(topic, payload) pairs announcing (or, if disabled, removing) the Home Assistant entities."""
     entities = (
         ('sensor', 'status'), ('binary_sensor', 'problem'), ('sensor', 'offline'), ('sensor', 'missing'),
-    )
+    ) + tuple(('switch', key) for key in NOTIFY_KINDS.values())
     topics = ['%s/%s/zigbee_monitor/%s/config' % (DISCOVERY_PREFIX, component, key)
               for component, key in entities]
     if not enabled:
@@ -1632,6 +1756,14 @@ def discovery_messages(enabled, slug=None):
              default_entity_id='sensor.zigbee_monitor_missing', icon='mdi:help-network-outline',
              state_class='measurement', value_template='{{ value_json.missing }}'),
     ]
+    # Notification switches: the same settings as the panel's Settings tab, kept in sync.
+    icons = {'devices': 'mdi:bell-ring-outline', 'general': 'mdi:bell-alert-outline', 'system': 'mdi:bell-cog-outline'}
+    for kind, key in NOTIFY_KINDS.items():
+        configs.append(dict(common, name=t('entity_notify_' + kind), unique_id='zigbee_monitor_' + key,
+                            default_entity_id='switch.zigbee_monitor_' + key, icon=icons[kind],
+                            entity_category='config', state_topic=SETTINGS_TOPIC,
+                            value_template="{{ 'ON' if value_json.%s else 'OFF' }}" % key,
+                            command_topic='%s/%s/set' % (SETTINGS_TOPIC, key), payload_on='ON', payload_off='OFF'))
     return [(topic, json.dumps(config, ensure_ascii=False)) for topic, config in zip(topics, configs)]
 
 
@@ -1701,7 +1833,13 @@ def parse_ieee_list(value):
     return result
 
 
-def make_handler(journal, panel, monitor=None):
+def settings_view(settings):
+    """Panel data for the Settings tab."""
+    return {'notify': settings.snapshot(), 'targets': settings.targets, 'discovery': settings.discovery,
+            'entities': {kind: 'switch.zigbee_monitor_' + key for kind, key in NOTIFY_KINDS.items()}}
+
+
+def make_handler(journal, panel, monitor=None, settings=None):
     class Handler(BaseHTTPRequestHandler):
         server_version = 'ZigbeeMonitor'
         sys_version = ''
@@ -1736,6 +1874,8 @@ def make_handler(journal, panel, monitor=None):
                 self._send(200, json.dumps(body, ensure_ascii=False), 'application/json; charset=utf-8')
             elif path == '/api/devices' and monitor is not None:
                 self._send(200, json.dumps(monitor.devices_view(), ensure_ascii=False), 'application/json; charset=utf-8')
+            elif path == '/api/settings' and settings is not None:
+                self._send(200, json.dumps(settings_view(settings)), 'application/json; charset=utf-8')
             else:
                 self.send_error(404)
 
@@ -1762,6 +1902,21 @@ def make_handler(journal, panel, monitor=None):
                     return
                 journal.clear()
                 self._send(200, '{"ok": true}', 'application/json; charset=utf-8')
+            elif path == '/api/settings' and settings is not None:
+                if self.headers.get('X-Zigbee-Monitor') != 'settings':
+                    self.send_error(403)
+                    return
+                try:
+                    notify = json.loads(raw or b'{}').get('notify')
+                    if not isinstance(notify, dict) or not notify or any(
+                            kind not in NOTIFY_KINDS or not isinstance(value, bool) for kind, value in notify.items()):
+                        raise ValueError('invalid settings')
+                except (ValueError, AttributeError):
+                    self.send_error(400)
+                    return
+                for kind, value in notify.items():
+                    settings.set_notify(kind, value, 'panel')
+                self._send(200, json.dumps(settings_view(settings)), 'application/json; charset=utf-8')
             elif path == '/api/devices' and monitor is not None:
                 if self.headers.get('X-Zigbee-Monitor') != 'devices':
                     self.send_error(403)
@@ -1786,9 +1941,9 @@ def make_handler(journal, panel, monitor=None):
     return Handler
 
 
-def start_panel(journal, panel, port=PANEL_PORT, monitor=None):
+def start_panel(journal, panel, port=PANEL_PORT, monitor=None, settings=None):
     try:
-        server = ThreadingHTTPServer(('0.0.0.0', port), make_handler(journal, panel, monitor))
+        server = ThreadingHTTPServer(('0.0.0.0', port), make_handler(journal, panel, monitor, settings))
     except OSError:
         LOG.warning(t('log_panel_failed', port=port))
         return None
@@ -1821,11 +1976,15 @@ def main():
         journal_write(SYSTEM, t('no_broker'))
         raise SystemExit(1) from None
     mode = t('mqtt_auto') if broker['mode'] == 'auto' else t('mqtt_manual', host=broker['host'])
-    journal_write(SYSTEM, tn('started', len(targets), version=VERSION, n=len(store.watched),
-                             t=len(targets), mqtt=mode, base=base))
+    settings = Settings()
+    settings.targets, settings.discovery = bool(targets), bool(discovery)
+    started = tn('started', len(targets), version=VERSION, n=len(store.watched), t=len(targets), mqtt=mode, base=base)
+    if targets:
+        started += ' · ' + settings.describe()
+    journal_write(SYSTEM, started)
     monitor = Monitor(store, base)
     notifier = Notifier(targets)
-    alerts = Alerts(notifier, set(monitor.expected.values()))
+    alerts = Alerts(notifier, set(monitor.expected.values()), settings=settings)
     tracker = EventTracker(alerts=alerts)
     slug = own_slug()
     button_actions = queue.Queue()
@@ -1833,7 +1992,7 @@ def main():
         ActionListener(button_actions).start()
     panel = PanelState()
     panel.actions = button_actions
-    start_panel(JOURNAL, panel, monitor=monitor)
+    start_panel(JOURNAL, panel, monitor=monitor, settings=settings)
     announcements = discovery_messages(discovery, slug if discovery else None)
     running = True
 
@@ -1855,7 +2014,7 @@ def main():
     dirty = True
 
     def on_connect(c, userdata, flags, reason, properties):
-        nonlocal connected, dirty
+        nonlocal connected, dirty, settings_published
         if reason.is_failure:
             LOG.error(t('log_mqtt_refused'))
             tracker.mqtt_down()
@@ -1863,7 +2022,10 @@ def main():
         connected = True
         monitor.reset()
         dirty = True
+        settings_published = None  # retained switch states are published again after (re)connecting
         c.subscribe(base + '/#', qos=1)
+        if discovery:
+            c.subscribe(SETTINGS_TOPIC + '/+/set', qos=1)
         for topic, payload in announcements:
             c.publish(topic, payload, qos=1, retain=True)
         c.publish(AVAILABILITY, 'online', qos=1, retain=True)
@@ -1881,6 +2043,13 @@ def main():
     def on_message(c, userdata, message):
         nonlocal dirty
         try:
+            if message.topic.startswith(SETTINGS_TOPIC + '/') and message.topic.endswith('/set'):
+                key = message.topic[len(SETTINGS_TOPIC) + 1:-len('/set')]
+                kind = next((k for k, v in NOTIFY_KINDS.items() if v == key), None)
+                value = message.payload.decode('utf-8').strip().upper()
+                if kind and value in ('ON', 'OFF'):
+                    settings.set_notify(kind, value == 'ON', 'ha')
+                return
             if monitor.wants(message.topic):
                 if monitor.receive(message.topic, message.payload):
                     new = store.observe(dict(monitor.actual))
@@ -1899,6 +2068,7 @@ def main():
     client.on_message, client.on_subscribe = on_message, on_subscribe
     last_publish = 0
     journal_version = None
+    settings_published = None  # settings.version last published to the Home Assistant switches
     change_log = ChangeLogger()
     LOG.info(t('log_start', version=VERSION, n=len(monitor.expected), language=LANG) + ' · MQTT: ' + mode + ' · Z2M: ' + base)
     try:
@@ -1923,6 +2093,10 @@ def main():
                     tracker.mqtt_down()
                 connected = False
                 continue
+            if discovery and settings.version != settings_published:
+                state = {key: settings.notifies(kind) for kind, key in NOTIFY_KINDS.items()}
+                if client.publish(SETTINGS_TOPIC, json.dumps(state), qos=1, retain=True).rc == mqtt.MQTT_ERR_SUCCESS:
+                    settings_published = settings.version
             report, changed = panel.sync(monitor, tracker)
             dirty = dirty or changed
             now = time.monotonic()
@@ -2055,6 +2229,17 @@ button:disabled { opacity: .45; cursor: default; }
 .pill.new { color: var(--info); background: var(--info-bg); }
 .pill.since { color: var(--muted); background: var(--neutral-bg); }
 .note { padding: 12px 10px; color: var(--muted); }
+.sep { display: flex; align-items: center; gap: 8px; padding: 8px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: .03em; }
+.sep::after { content: ''; flex: 1; border-top: 2px solid currentColor; opacity: .5; }
+.sep.online { color: var(--ok); }
+.sep.offline, .sep.missing { color: var(--bad); }
+.sep.unknown { color: var(--warn); }
+#view-settings h2 { font-size: 15px; margin: 0 0 4px; }
+.setting { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.setting input { flex: 0 0 auto; min-width: 0; width: 18px; height: 18px; margin-top: 2px; }
+.setting label { flex: 1; min-width: 0; cursor: pointer; }
+.setting .help { display: block; color: var(--muted); font-size: 12px; }
+.setting .entity { display: block; color: var(--muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 .hidden { display: none !important; }
 </style>
 </head>
@@ -2067,6 +2252,7 @@ button:disabled { opacity: .45; cursor: default; }
   <nav class="tabs">
     <button class="tab active" id="tab-status" data-t="tab_status"></button>
     <button class="tab" id="tab-devices" data-t="tab_devices"></button>
+    <button class="tab" id="tab-settings" data-t="tab_settings"></button>
   </nav>
   <div id="view-status">
     <div class="banner hidden" id="setup">
@@ -2130,6 +2316,14 @@ button:disabled { opacity: .45; cursor: default; }
       </div>
     </section>
   </div>
+  <div id="view-settings" class="hidden">
+    <section class="card">
+      <h2 data-t="settings_notify"></h2>
+      <div class="muted" data-t="settings_notify_help"></div>
+      <div class="banner hidden" id="no-targets"><b data-t="settings_no_targets"></b></div>
+      <div id="notify-settings"></div>
+    </section>
+  </div>
 </main>
 <script>
 const T = __TEXTS__;
@@ -2163,9 +2357,64 @@ function setup() {
 function showTab(name) {
   $('tab-status').classList.toggle('active', name === 'status');
   $('tab-devices').classList.toggle('active', name === 'devices');
+  $('tab-settings').classList.toggle('active', name === 'settings');
   $('view-status').classList.toggle('hidden', name !== 'status');
   $('view-devices').classList.toggle('hidden', name !== 'devices');
+  $('view-settings').classList.toggle('hidden', name !== 'settings');
   if (name === 'devices') loadDevices();
+  if (name === 'settings') loadSettings();
+}
+
+let settings = null;
+
+function renderSettings() {
+  if (!settings) return;
+  $('no-targets').classList.toggle('hidden', settings.targets);
+  const box = $('notify-settings'); box.replaceChildren();
+  for (const kind of ['devices', 'general', 'system']) {
+    const row = el('div', 'setting');
+    const input = el('input'); input.type = 'checkbox'; input.id = 'set-' + kind;
+    input.checked = settings.notify[kind];
+    input.addEventListener('change', () => changeSetting(kind, input.checked));
+    const label = el('label'); label.htmlFor = input.id;
+    label.append(el('b', '', T['set_' + kind]), el('span', 'help', T['set_' + kind + '_help']));
+    if (settings.discovery) {
+      // long entity ids wrap after '.' or '_' on narrow screens
+      const entity = el('span', 'entity');
+      for (const part of settings.entities[kind].split(/([._])/)) {
+        entity.append(part);
+        if (part === '.' || part === '_') entity.append(document.createElement('wbr'));
+      }
+      label.append(entity);
+    }
+    row.append(input, label);
+    box.append(row);
+  }
+}
+
+async function loadSettings() {
+  try {
+    const r = await fetch('api/settings', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    settings = await r.json();
+    renderSettings();
+  } catch (err) {
+    $('refreshed').className = 'error';
+    $('refreshed').textContent = fmt(T.refresh_failed, { error: err.message });
+  }
+}
+
+async function changeSetting(kind, value) {
+  try {
+    const r = await fetch('api/settings', { method: 'POST', headers: { 'X-Zigbee-Monitor': 'settings', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notify: { [kind]: value } }) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    settings = await r.json();
+  } catch (err) {
+    alert(fmt(T.settings_failed, { error: err.message }));
+  }
+  renderSettings();
+  load();  // the change is in the history
 }
 
 function renderStatus(s) {
@@ -2265,7 +2514,18 @@ function renderDevices() {
   $('unwatched-n').textContent = devices.z2m_valid ? devices.unwatched.length : '–';
   const w = $('w-list'); w.replaceChildren();
   const ws = visible(devices.watched);
-  ws.forEach((d) => w.append(deviceRow('w', d)));
+  // Problems come first (sorted by the monitor); a coloured separator starts each status group,
+  // unless every device shown is online.
+  const grouped = ws.some((d) => d.status !== 'online');
+  let group = null;
+  for (const d of ws) {
+    if (grouped && d.status !== group) {
+      group = d.status;
+      const n = ws.filter((x) => x.status === group).length;
+      w.append(el('div', 'sep ' + group, (T.status[group] || group) + ' · ' + n));
+    }
+    w.append(deviceRow('w', d));
+  }
   if (!devices.watched.length) w.append(el('div', 'note', T.no_watched));
   const u = $('u-list'); u.replaceChildren();
   const us = visible(devices.unwatched);
@@ -2334,6 +2594,7 @@ async function load() {
 setup();
 $('tab-status').addEventListener('click', () => showTab('status'));
 $('tab-devices').addEventListener('click', () => showTab('devices'));
+$('tab-settings').addEventListener('click', () => showTab('settings'));
 $('setup-choose').addEventListener('click', () => showTab('devices'));
 $('setup-all').addEventListener('click', () => devices && changeDevices(devices.unwatched.map((d) => d.ieee), []));
 $('filter').addEventListener('change', renderEvents);
@@ -2376,7 +2637,7 @@ $('clear').addEventListener('click', async () => {
 });
 load();
 loadDevices();
-setInterval(() => { load(); loadDevices(); }, 10000);
+setInterval(() => { load(); loadDevices(); if (!$('view-settings').classList.contains('hidden')) loadSettings(); }, 10000);
 </script>
 </body>
 </html>

@@ -75,12 +75,38 @@ explains why.
 
 Two lists, with search, checkboxes and *select all / none*:
 
-- **Watched**, each with its status: *Online*, *Offline*, *Missing* or *No data*.
+- **Watched**, each with its status: *Online*, *Offline*, *Missing* or *No data*. Devices with a
+  problem come first (offline, then missing, then no data, then online), each group sorted by name
+  and started by a coloured separator with its count. When every device is online there are no
+  separators.
 - **Not watched**: the other devices in Zigbee2MQTT. Devices added to Zigbee2MQTT in the last 24 hours
   are marked **NEW**.
 
 New devices are **never watched automatically**: a line in the history tells you one appeared, and you
 decide whether to watch it. Names always follow Zigbee2MQTT: renaming a device there renames it here.
+
+### Settings tab
+
+**Notifications**: choose which alerts reach your notification targets. A change applies at once,
+with no restart, is kept across restarts and updates, and writes a *System* line in the history
+(saying whether it came from the panel or from Home Assistant).
+
+| Setting | What it sends | Default |
+|---|---|---|
+| **Devices** | New offline, missing and recovered devices. | On |
+| **General failure** | The general-failure notice (with its buttons) and *Network stable*. | On |
+| **System** | Zigbee2MQTT or the MQTT connection down for more than 2 minutes, the reminder while no device is watched, availability disabled. | On |
+
+- Only notifications change: the history, the add-on log, the panel and the entities always record
+  everything.
+- With **General failure** off, a mass failure is not silent: the lost devices come in the device
+  notification, with their names (if **Devices** is on). Turning it off during a general failure
+  ends that failure without the *Network stable* message.
+- While a kind is off, Zigbee Monitor still remembers what happened: turning it back on does not
+  send old news.
+- The same three settings are Home Assistant switches (see *Entities*).
+- They only matter when `notify_targets` has at least one target; otherwise the tab says so.
+- The start line in the history lists the active notifications, e.g. *Notifications: all*.
 
 ### What the statuses mean
 
@@ -96,7 +122,7 @@ again later, it shows up as a new device.
 
 ## Entities
 
-With `mqtt_discovery` enabled, one device called **Zigbee Monitor** is created with four entities:
+With `mqtt_discovery` enabled, one device called **Zigbee Monitor** is created with these entities:
 
 | Entity | Description |
 |---|---|
@@ -104,6 +130,14 @@ With `mqtt_discovery` enabled, one device called **Zigbee Monitor** is created w
 | `binary_sensor.zigbee_monitor_problem` | On when the state is `PROBLEM`, off when `OK`, unknown when `NO_DATA`. |
 | `sensor.zigbee_monitor_offline` | Number of offline watched devices. |
 | `sensor.zigbee_monitor_missing` | Number of missing watched devices. |
+| `switch.zigbee_monitor_notify_devices` | Device notifications on/off. |
+| `switch.zigbee_monitor_notify_general_failure` | General-failure notifications on/off. |
+| `switch.zigbee_monitor_notify_system` | System notifications on/off. |
+
+The switches are the settings of the panel's *Settings* tab (a change on either side shows on the
+other) and appear in the *Configuration* section of the device page. Use them in dashboards or
+automations, e.g. to turn device notifications off at night. To hide them, disable them in Home
+Assistant (entity settings).
 
 Attributes of `sensor.zigbee_monitor_status`:
 
@@ -123,7 +157,8 @@ The full status is also published, retained, on the MQTT topic `zigbee_monitor/s
 
 ## Notifications
 
-Notifications are sent only when something changes, never repeatedly for the same problem:
+Notifications are sent only when something changes, never repeatedly for the same problem. Each
+kind below can be turned off in the *Settings* tab (all are on by default):
 
 - A watched device goes offline, goes missing, or recovers. These are grouped: each change waits
   20 seconds for more, and when devices stop changing a single message tells the net result, with

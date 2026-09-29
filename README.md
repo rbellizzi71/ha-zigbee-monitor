@@ -11,9 +11,9 @@ A Home Assistant add-on that watches your **Zigbee2MQTT** devices and alerts you
 
 - **Sidebar panel**: choose the devices to watch, see their status and browse the history of changes.
 - **Smart notifications**: one message per change, no repeats, and no false alarms while
-  Zigbee2MQTT restarts.
-- **Home Assistant entities**: a status sensor, a problem binary sensor and offline/missing counters,
-  ready for automations and dashboards.
+  Zigbee2MQTT restarts. Choose which kinds you get (devices, general failure, system), live.
+- **Home Assistant entities**: a status sensor, a problem binary sensor, offline/missing counters and
+  notification switches, ready for automations and dashboards.
 - **Easy setup**: connects automatically to the Mosquitto broker add-on.
 - **English and Spanish.**
 

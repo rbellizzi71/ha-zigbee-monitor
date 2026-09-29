@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0
+
+- New **Settings** tab in the panel: choose which notifications are sent (devices, general failure,
+  system). Changes apply at once, without a restart, and are written to the history. All are on by
+  default. With general failure off, the lost devices come in the device notification, with names.
+  Only notifications change: history, log, panel and entities keep recording everything.
+- The same settings as three Home Assistant switches in the Zigbee Monitor device
+  (`switch.zigbee_monitor_notify_devices`, `…_notify_general_failure`, `…_notify_system`), in sync
+  with the panel, for dashboards and automations.
+- Devices tab: watched devices with a problem come first (offline, missing, no data, then online),
+  each group sorted by name and started by a coloured separator with its count.
+- The start line in the history lists the active notifications.
+- Release workflow: a release created by hand on GitHub is updated instead of failing the run.
+
 ## 1.2.1
 
 - Fix: a device that left and rejoined the network, was re-paired or was renamed could stay
