@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = '1.4.0'
+VERSION = '1.4.1'
 DATA = Path(os.environ.get('ZM_DATA', '/data'))
 OPTIONS = DATA / 'options.json'
 DEVICES = DATA / 'devices.json'
@@ -546,6 +546,7 @@ MESSAGES = {
         'mqtt_failed': 'No se pudo conectar al broker MQTT',
         'z2m_offline': 'Zigbee2MQTT está offline',
         'z2m_back': 'Zigbee2MQTT volvió a estar online; esperando {s} s a que la red se estabilice',
+        'startup_wait': 'Al arrancar, {n} dispositivos aparecen caídos desde la última vez (¿Zigbee2MQTT está arrancando?); esperando hasta {s} s a que la red se estabilice',
         'z2m_settled': 'Reconexión de Zigbee2MQTT completada',
         'no_valid_data': 'Sin datos válidos de Zigbee2MQTT',
         'all_expected_ok_one': 'El único dispositivo vigilado está en línea',
@@ -668,6 +669,7 @@ MESSAGES = {
         'mqtt_failed': 'Could not connect to the MQTT broker',
         'z2m_offline': 'Zigbee2MQTT is offline',
         'z2m_back': 'Zigbee2MQTT is back online; waiting {s} s for the network to settle',
+        'startup_wait': 'At startup, {n} devices are down since last time (is Zigbee2MQTT starting?); waiting up to {s} s for the network to settle',
         'z2m_settled': 'Zigbee2MQTT reconnection completed',
         'no_valid_data': 'No valid data from Zigbee2MQTT',
         'all_expected_ok_one': 'The only watched device is online',
@@ -1131,6 +1133,11 @@ class EventTracker:
         self.logged_signature = None
         self.force_full = False
         self.availability = None  # last known Zigbee2MQTT availability setting
+        # Monitor start: if the first trusted state has a general failure's worth of devices down
+        # that were fine when the monitor stopped, Zigbee2MQTT is probably starting too (host
+        # reboot, power cut) and pinging the mesh. Wait like after a Zigbee2MQTT return.
+        self.startup = True       # the first trusted state has not been judged yet
+        self.startup_until = None  # holding the startup state until then
 
     def watch_list_changed(self, removed_names):
         """The panel changed the watched list: forget removed devices (no false 'recovered')
@@ -1171,6 +1178,8 @@ class EventTracker:
             self.bridge = bridge
         if not ready or self.mqtt != 'up' or bridge != 'online':
             return
+        if self.startup and self._startup_hold(payload, now):
+            return
         if self.settle_until is not None:
             if now < self.settle_until:
                 if self.settle_is_z2m:
@@ -1188,6 +1197,28 @@ class EventTracker:
         self._check_availability(payload.get('z2m_availability'))
         self._log(payload, now)
         self.incidents.observe(payload)
+
+    def _startup_hold(self, payload, now):
+        """True while the startup state is held back. Once released, the state is judged as usual
+        (against what was notified before the stop): devices still down then are real news, and a
+        general failure is still announced."""
+        if self.settle_until is not None and now < self.settle_until:
+            return False  # the MQTT settle comes first
+        if not payload.get('data_valid'):
+            return False
+        down = self.alerts.unexpected(payload)
+        if self.startup_until is None:
+            if down < GENERAL_FAILURE or self.settle_z2m <= 0:
+                self.startup = False
+                return False
+            self.startup_until = now + self.settle_z2m
+            self.write(SYSTEM, t('startup_wait', n=down, s=self.settle_z2m))
+            return True
+        if down and now < self.startup_until:
+            return True
+        self.startup, self.startup_until = False, None
+        self.force_full = True
+        return False
 
     def _log_reconnections(self, payload):
         """During a Zigbee2MQTT settle, write each device that was down before and is online again,
@@ -1256,7 +1287,8 @@ class EventTracker:
         self.incidents.tick()
         # Grouped device notifications wait while the data cannot be trusted: MQTT down,
         # Zigbee2MQTT offline or a settle window. They resolve against the settled state.
-        hold = self.mqtt != 'up' or self.bridge != 'online' or self.settle_until is not None
+        hold = (self.mqtt != 'up' or self.bridge != 'online' or self.settle_until is not None
+                or self.startup_until is not None)
         self.alerts.flush(now, hold)
 
 
@@ -1560,6 +1592,12 @@ class Alerts:
                 len(self.losses) >= GENERAL_FAILURE or len(new_offline) + len(new_missing) >= GENERAL_FAILURE):
             self._start_general(current, now)
 
+    def unexpected(self, payload):
+        """How many devices are down now that were not down in what was last notified."""
+        known = self.current if self.current is not None else self.problems
+        down = set(payload.get('offline_names') or []) | set(payload.get('missing_names') or [])
+        return len(down - set(known))
+
     def _changes(self, current):
         new_offline = sorted(n for n, k in current.items() if k == 'offline' and self.problems.get(n) != 'offline')
         new_missing = sorted(n for n, k in current.items() if k == 'missing' and self.problems.get(n) != 'missing')
@@ -1716,6 +1754,9 @@ class NoAlerts:
 
     def devices(self, payload, now):
         pass
+
+    def unexpected(self, payload):
+        return 0
 
     def flush(self, now, hold=False):
         pass

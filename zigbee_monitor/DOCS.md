@@ -226,6 +226,9 @@ kind below can be turned off in the *Settings* tab (all are on by default):
 
 After Zigbee2MQTT restarts, devices reconnect gradually. Zigbee Monitor waits 2 minutes for the network
 to settle and then notifies only the real difference from before the restart.
+The same wait applies when Zigbee Monitor starts and at least 5 devices that were fine when it
+stopped appear down (Home Assistant host reboot or power cut, with Zigbee2MQTT starting at the same
+time): a *System* line tells about the wait, and only what is still down afterwards is notified.
 
 ### General failure
 

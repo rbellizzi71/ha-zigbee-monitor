@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.1
+
+- No false general failure when Zigbee Monitor starts together with Zigbee2MQTT (Home Assistant
+  host reboot or power cut). If at least 5 devices that were fine when the monitor stopped appear
+  down at startup, it waits up to 2 minutes for the network to settle, as after a Zigbee2MQTT
+  restart, and writes a *System* line saying so. Devices still down after the wait are notified as
+  usual, including a general failure.
+
 ## 1.4.0
 
 - New **Traffic** tab: messages Zigbee2MQTT publishes for each device in the last hour, day, week or
